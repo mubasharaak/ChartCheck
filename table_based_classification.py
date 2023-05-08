@@ -23,11 +23,13 @@ train_dataset_path = os.path.join("data", "")
 test_dataset_path = os.path.join("data", "")
 dev_dataset_path = os.path.join("data", "")
 
+DATASET_PATH = "claim_explanation_verification_pre_tasksets.json"
+
 label_dict = {
     "Yes": 0,
     "No": 1,
-    "True": 0,
-    "False": 1,
+    "TRUE": 0,
+    "FALSE": 1,
 }
 
 
@@ -36,11 +38,7 @@ def join_unicode(delim, entries):
     return delim.join(entries)
 
 
-def read_chart_dataset(path: str):
-    # load file
-    with open(path, "r", encoding="utf-8") as file:
-        dataset = json.load(file)
-
+def read_chart_dataset(dataset):
     claims = []
     tables = []
     labels = []
@@ -158,10 +156,32 @@ if __name__ == "__main__":
     model.to(device)
     model.train()
 
+    # load file
+    with open(DATASET_PATH, "r", encoding="utf-8") as file:
+        data = json.load(file)
+
+    np.random.seed(42)
+
+    # Shuffle the indices of the data
+    indices = np.random.permutation(len(data))
+
+    # Calculate the number of samples in the training, validation, and testing sets
+    num_train = int(0.8 * len(data))
+    num_val = int(0.1 * len(data))
+
+    # Split the indices into training, validation, and testing sets
+    train_indices = indices[:num_train]
+    val_indices = indices[num_train:num_train + num_val]
+    test_indices = indices[num_train + num_val:]
+
+    train_data = data[train_indices]
+    val_data = data[val_indices]
+    test_data = data[test_indices]
+
     # Dataset preperation
-    train_claims, train_tables, train_labels = read_chart_dataset(train_dataset_path)
-    test_claims, test_tables, test_labels = read_chart_dataset(test_dataset_path)
-    eval_claims, dev_tables, eval_labels = read_chart_dataset(dev_dataset_path)
+    train_claims, train_tables, train_labels = read_chart_dataset(train_data)
+    test_claims, test_tables, test_labels = read_chart_dataset(test_data)
+    val_claims, val_tables, val_labels = read_chart_dataset(val_data)
 
     train_tokenized = tokenizer(train_claims, train_tables,
                                 max_length=max_length,
@@ -173,11 +193,11 @@ if __name__ == "__main__":
                                return_token_type_ids=True, truncation=True,
                                padding=True)
     test_dataset = ChartDataset(test_tokenized, test_labels)
-    dev_tokenized = tokenizer(eval_claims, dev_tables,
+    dev_tokenized = tokenizer(val_claims, val_tables,
                               max_length=max_length,
                               return_token_type_ids=True, truncation=True,
                               padding=True)
-    dev_dataset = ChartDataset(dev_tokenized, eval_labels)
+    dev_dataset = ChartDataset(dev_tokenized, val_labels)
 
     results_dict = train(model, training_args, train_dataset=train_dataset,
                          dev_dataset=dev_dataset, test_dataset=test_dataset, only_test=False)

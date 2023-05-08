@@ -1,18 +1,10 @@
-import argparse
-import csv
 import json
 import os
-import random
-import re
-import sys
-from collections import OrderedDict
 
 import evaluate
 import numpy as np
-import pandas as pd
 
 import torch
-from torch.utils.data import DataLoader
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trainer
 from transformers import TrainingArguments
 from sklearn.metrics import f1_score
@@ -47,12 +39,14 @@ def read_chart_dataset(dataset):
         try:
             path_table = os.path.join("/scratch/users/k20116188/chart-fact-checking/deplot-tables",
                                       os.path.basename(item["chart_img"]) + ".txt")
-            with open(path_table, "w", encoding="utf-8") as f:
+
+            with open(path_table, "r", encoding="utf-8") as f:
                 table = f.readlines()
 
             claim = item["claim"]
-            label = label_dict[item["label"]]
-        except IndexError:
+            label = item["label"]
+        except IndexError as e:
+            print(f"Exception for file {path_table}: {e}.")
             continue
 
         claims.append(claim)
@@ -161,6 +155,7 @@ if __name__ == "__main__":
         data = json.load(file)
 
     np.random.seed(42)
+    data = np.array(data)
 
     # Shuffle the indices of the data
     indices = np.random.permutation(len(data))

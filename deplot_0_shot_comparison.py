@@ -1,10 +1,13 @@
 import numpy as np
-from transformers import AutoProcessor, Pix2StructForConditionalGeneration
+from transformers import AutoProcessor, Pix2StructForConditionalGeneration, Pix2StructProcessor, Pix2StructImageProcessor
 import json
 from PIL import Image
 import os
 import torch
 import cv2
+import requests
+from io import BytesIO
+
 
 def sharpen_image(img):
     img = np.array(img)
@@ -25,30 +28,28 @@ def sharpen_image(img):
     sharpened_pil_img = Image.fromarray(sharpened_img)
     return sharpened_pil_img
 
+
 model = Pix2StructForConditionalGeneration.from_pretrained("google/deplot")
 processor = AutoProcessor.from_pretrained("google/deplot")
 device = "cuda" if torch.cuda.is_available() else "cpu"
+processor.image_processor.is_vqa = False
+model.to(device)
 
-processor.image_processor.is_vqa=False
-
-model.to(device);
-
-with open("claim_explanation_verification_pre_tasksets.json", "r") as f:
+with open("claim_explanation_generation_pre_tasksets.json", "r") as f:
     data = json.load(f)
 
-for example in data:
-    example["label"] = "Yes" if example["label"] == "TRUE" else "No"
+print(f"Length of loaded dataset is: {len(data)} entries.")
 
-new_data = []
-for example in data:
-    try:
-        imgname = os.path.basename(example["chart_img"])
-        Image.open(f"ChartFC/{imgname}").convert('RGB')
-        new_data.append(example)
-    except Exception:
-        pass
-
-data=np.array(new_data)
+# new_data = [] @todo ask Nikesh why this conversion necessary
+# for example in data:
+#     try:
+#         imgname = os.path.basename(example["chart_img"])
+#         Image.open(f"ChartFC/{imgname}").convert('RGB')
+#         new_data.append(example)
+#     except Exception:
+#         pass
+#
+data = np.array(data)
 
 np.random.seed(42)
 
@@ -68,7 +69,7 @@ train_data = data[train_indices]
 val_data = data[val_indices]
 test_data = data[test_indices]
 
-len(train_data)
+len(f"Training data length: {len(train_data)}")
 
 with open("barchart_horizontal.json", "r") as f:
     bar_horizontal = json.load(f)[0]
@@ -113,78 +114,22 @@ category = {"bar_horizontal":[], "bar_vertical":[],"line_chart":[],"pie_chart":[
 for item in train_data:
     category[item["chart_type"]].append(item)
 
-# for item in np.random.choice(category["bar_horizontal"], 10, replace=False):
-#     imgname = os.path.basename(item["chart_img"])
-#     img = Image.open(f"ChartFC/{imgname}").convert('RGB')
-#     sharpened_img = sharpen_image(img)
-#     normal_inputs = processor(images=img, return_tensors="pt")
-#     sharpened_input = processor(images=sharpened_img, return_tensors="pt")
-#     normal_generated_ids = model.generate(flattened_patches=normal_inputs["flattened_patches"].to(device), attention_mask=normal_inputs["attention_mask"].to(device), max_new_tokens=512)
-#     normal_predicted_answer = processor.tokenizer.batch_decode(normal_generated_ids,skip_special_tokens=True)[0].replace("<0x0A>", "\n")
-#     sharpened_generated_ids = model.generate(flattened_patches=sharpened_input["flattened_patches"].to(device), attention_mask=sharpened_input["attention_mask"].to(device), max_new_tokens=512)
-#     sharpened_predicted_answer = processor.tokenizer.batch_decode(sharpened_generated_ids,skip_special_tokens=True)[0].replace("<0x0A>", "\n")
-#     img.show()
-#     print(normal_predicted_answer)
-#     sharpened_img.show()
-#     print(sharpened_predicted_answer)
-#
-# for item in np.random.choice(category["bar_vertical"], 10, replace=False):
-#   imgname = os.path.basename(item["chart_img"])
-#   img = Image.open(f"ChartFC/{imgname}").convert('RGB')
-#   sharpened_img = sharpen_image(img)
-#   normal_inputs = processor(images=img, return_tensors="pt")
-#   sharpened_input = processor(images=sharpened_img, return_tensors="pt")
-#   normal_generated_ids = model.generate(flattened_patches=normal_inputs["flattened_patches"].to(device), attention_mask=normal_inputs["attention_mask"].to(device), max_new_tokens=512)
-#   normal_predicted_answer = processor.tokenizer.batch_decode(normal_generated_ids,skip_special_tokens=True)[0].replace("<0x0A>", "\n")
-#   sharpened_generated_ids = model.generate(flattened_patches=sharpened_input["flattened_patches"].to(device), attention_mask=sharpened_input["attention_mask"].to(device), max_new_tokens=512)
-#   sharpened_predicted_answer = processor.tokenizer.batch_decode(sharpened_generated_ids,skip_special_tokens=True)[0].replace("<0x0A>", "\n")
-#   img.show()
-#   print(normal_predicted_answer)
-#   sharpened_img.show()
-#   print(sharpened_predicted_answer)
-#
-# for item in np.random.choice(category["line_chart"], 10, replace=False):
-#   imgname = os.path.basename(item["chart_img"])
-#   img = Image.open(f"ChartFC/{imgname}").convert('RGB')
-#   sharpened_img = sharpen_image(img)
-#   normal_inputs = processor(images=img, return_tensors="pt")
-#   sharpened_input = processor(images=sharpened_img, return_tensors="pt")
-#   normal_generated_ids = model.generate(flattened_patches=normal_inputs["flattened_patches"].to(device), attention_mask=normal_inputs["attention_mask"].to(device), max_new_tokens=512)
-#   normal_predicted_answer = processor.tokenizer.batch_decode(normal_generated_ids,skip_special_tokens=True)[0].replace("<0x0A>", "\n")
-#   sharpened_generated_ids = model.generate(flattened_patches=sharpened_input["flattened_patches"].to(device), attention_mask=sharpened_input["attention_mask"].to(device), max_new_tokens=512)
-#   sharpened_predicted_answer = processor.tokenizer.batch_decode(sharpened_generated_ids,skip_special_tokens=True)[0].replace("<0x0A>", "\n")
-#   img.show()
-#   print(normal_predicted_answer)
-#   sharpened_img.show()
-#   print(sharpened_predicted_answer)
-#
-# for item in np.random.choice(category["pie_chart"], 10, replace=False):
-#   imgname = os.path.basename(item["chart_img"])
-#   img = Image.open(f"ChartFC/{imgname}").convert('RGB')
-#   sharpened_img = sharpen_image(img)
-#   normal_inputs = processor(images=img, return_tensors="pt")
-#   sharpened_input = processor(images=sharpened_img, return_tensors="pt")
-#   normal_generated_ids = model.generate(flattened_patches=normal_inputs["flattened_patches"].to(device), attention_mask=normal_inputs["attention_mask"].to(device), max_new_tokens=512)
-#   normal_predicted_answer = processor.tokenizer.batch_decode(normal_generated_ids,skip_special_tokens=True)[0].replace("<0x0A>", "\n")
-#   sharpened_generated_ids = model.generate(flattened_patches=sharpened_input["flattened_patches"].to(device), attention_mask=sharpened_input["attention_mask"].to(device), max_new_tokens=512)
-#   sharpened_predicted_answer = processor.tokenizer.batch_decode(sharpened_generated_ids,skip_special_tokens=True)[0].replace("<0x0A>", "\n")
-#   img.show()
-#   print(normal_predicted_answer)
-#   sharpened_img.show()
-#   print(sharpened_predicted_answer)
-#
-# for item in np.random.choice(category["mixed"], len(category["mixed"]), replace=False):
-#   imgname = os.path.basename(item["chart_img"])
-#   img = Image.open(f"ChartFC/{imgname}").convert('RGB')
-#   sharpened_img = sharpen_image(img)
-#   normal_inputs = processor(images=img, return_tensors="pt")
-#   sharpened_input = processor(images=sharpened_img, return_tensors="pt")
-#   normal_generated_ids = model.generate(flattened_patches=normal_inputs["flattened_patches"].to(device), attention_mask=normal_inputs["attention_mask"].to(device), max_new_tokens=512)
-#   normal_predicted_answer = processor.tokenizer.batch_decode(normal_generated_ids,skip_special_tokens=True)[0].replace("<0x0A>", "\n")
-#   sharpened_generated_ids = model.generate(flattened_patches=sharpened_input["flattened_patches"].to(device), attention_mask=sharpened_input["attention_mask"].to(device), max_new_tokens=512)
-#   sharpened_predicted_answer = processor.tokenizer.batch_decode(sharpened_generated_ids,skip_special_tokens=True)[0].replace("<0x0A>", "\n")
-#   img.show()
-#   print(normal_predicted_answer)
-#   sharpened_img.show()
-#   print(sharpened_predicted_answer)
-#
+print(f"len(data): {len(data)}")
+
+for item in data[130:]:
+    # Load image from web
+    response = requests.get(item["chart_img"])
+    img = Image.open(BytesIO(response.content)).convert('RGB')
+    normal_inputs = processor(images=img, return_tensors="pt")
+    # print(f"normal_inputs: {normal_inputs}")
+
+    normal_generated_ids = model.generate(flattened_patches=normal_inputs["flattened_patches"].to(device),
+                                          attention_mask=normal_inputs["attention_mask"].to(device), max_new_tokens=512)
+    normal_predicted_answer = processor.tokenizer.batch_decode(normal_generated_ids,
+                                                               skip_special_tokens=True)[0].replace("<0x0A>", "\n")
+    # print(normal_predicted_answer)
+
+    # save table to a file with title equal to os.path.basename(item["chart_img"])
+    path_table = os.path.join("/scratch/users/k20116188/chart-fact-checking/deplot-tables", os.path.basename(item["chart_img"])+".txt")
+    with open(path_table, "w", encoding="utf-8") as f:
+        f.write(normal_predicted_answer)

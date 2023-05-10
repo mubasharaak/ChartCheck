@@ -41,10 +41,10 @@ def read_chart_dataset(dataset):
                                       os.path.basename(item["chart_img"]) + ".txt")
 
             with open(path_table, "r", encoding="utf-8") as f:
-                table = f.readlines()
+                table = str(f.readlines())
 
-            claim = item["claim"]
-            label = item["label"]
+            claim = str(item["claim"])
+            label = str(item["label"])
         except IndexError as e:
             print(f"Exception for file {path_table}: {e}.")
             continue

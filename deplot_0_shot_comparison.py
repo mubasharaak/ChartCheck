@@ -116,20 +116,27 @@ for item in train_data:
 
 print(f"len(data): {len(data)}")
 
-for item in data[130:]:
-    # Load image from web
-    response = requests.get(item["chart_img"])
-    img = Image.open(BytesIO(response.content)).convert('RGB')
-    normal_inputs = processor(images=img, return_tensors="pt")
-    # print(f"normal_inputs: {normal_inputs}")
-
-    normal_generated_ids = model.generate(flattened_patches=normal_inputs["flattened_patches"].to(device),
-                                          attention_mask=normal_inputs["attention_mask"].to(device), max_new_tokens=512)
-    normal_predicted_answer = processor.tokenizer.batch_decode(normal_generated_ids,
-                                                               skip_special_tokens=True)[0].replace("<0x0A>", "\n")
-    # print(normal_predicted_answer)
-
-    # save table to a file with title equal to os.path.basename(item["chart_img"])
+for item in data[1190:]:
     path_table = os.path.join("/scratch/users/k20116188/chart-fact-checking/deplot-tables", os.path.basename(item["chart_img"])+".txt")
+    if os.path.isfile(path_table):
+        print(f"File {path_table} already exists.")
+        continue
+
+    # Load image from web
+    try:
+        response = requests.get(item["chart_img"])
+        img = Image.open(BytesIO(response.content)).convert('RGB')
+        normal_inputs = processor(images=img, return_tensors="pt")
+        # print(f"normal_inputs: {normal_inputs}")
+
+        normal_generated_ids = model.generate(flattened_patches=normal_inputs["flattened_patches"].to(device),
+                                              attention_mask=normal_inputs["attention_mask"].to(device), max_new_tokens=512)
+        normal_predicted_answer = processor.tokenizer.batch_decode(normal_generated_ids,
+                                                                   skip_special_tokens=True)[0].replace("<0x0A>", "\n")
+        # print(normal_predicted_answer)
+    except Exception as e:
+        print(f"Error for file {item['chart_img']}: {e}")
+        continue
+
     with open(path_table, "w", encoding="utf-8") as f:
         f.write(normal_predicted_answer)

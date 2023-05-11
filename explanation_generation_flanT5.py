@@ -85,9 +85,7 @@ def compute_metrics(eval_preds):
 
 
 def preprocess_function(examples):
-    inputs = [f"Explain why '{doc['claim']}' as {label_dict_reverse[doc['label']]} given this table: {read_table(doc['chart_img'])}." for doc in examples]
-    print(f"len(inputs): {len(inputs)}")
-
+    inputs = [f"Explain why '{doc['claim']}' is {label_dict_reverse[doc['label']]} given this table: {read_table(doc['chart_img'])}." for doc in examples]
     # inputs = [prefix + doc for doc in examples["document"]]
     model_inputs = tokenizer(inputs, max_length=max_input_length, padding="max_length", truncation=True)
 
@@ -96,7 +94,6 @@ def preprocess_function(examples):
         [(l if l != tokenizer.pad_token_id else -100) for l in label] for label in labels["input_ids"]
     ]
     model_inputs["labels"] = labels["input_ids"]
-    print(f"model_inputs: {len(model_inputs['labels'])}")
 
     return model_inputs
 

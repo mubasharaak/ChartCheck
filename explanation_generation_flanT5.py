@@ -7,11 +7,7 @@ import numpy as np
 
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trainer, DataCollatorForSeq2Seq
-from transformers import T5Tokenizer, T5ForConditionalGeneration
-from transformers import TrainingArguments, Seq2SeqTrainingArguments
 from transformers import AutoModelForSeq2SeqLM, DataCollatorForSeq2Seq, Seq2SeqTrainingArguments, Seq2SeqTrainer
-from sklearn.metrics import f1_score
-from datasets import load_dataset, load_metric
 from nltk.tokenize import sent_tokenize
 nltk.download("punkt")
 
@@ -57,29 +53,6 @@ def read_table(chart_filename: str):
     return table
 
 
-def read_chart_dataset(dataset):
-    input_list = []
-    labels = []
-
-    for item in dataset:
-        try:
-            path_table = os.path.join("/scratch/users/k20116188/chart-fact-checking/deplot-tables",
-                                      os.path.basename(item["chart_img"]) + ".txt")
-            with open(path_table, "r", encoding="utf-8") as f:
-                table = str(f.readlines())
-
-            claim = str(item["claim"])
-            label = item["explanation"]
-            model_input = f"Explain why '{claim}' as {label_dict_reverse[item['label']]} given this table: {table}."
-        except IndexError as e:
-            print(f"Exception for file {path_table}: {e}.")
-            continue
-        input_list.append(model_input)
-        labels.append(label)
-
-    return input_list, labels
-
-
 def postprocess_text(preds, labels):
     preds = [pred.strip() for pred in preds]
     labels = [label.strip() for label in labels]
@@ -103,9 +76,6 @@ def compute_metrics(eval_preds):
 
     # Some simple post-processing
     decoded_preds, decoded_labels = postprocess_text(decoded_preds, decoded_labels)
-    # print(f"decoded_preds: {decoded_preds}")
-    # print(f"decoded_labels: {decoded_labels}")
-
     result = metric.compute(predictions=decoded_preds, references=decoded_labels, use_stemmer=True)
 
     result = {k: round(v * 100, 4) for k, v in result.items()}
@@ -143,11 +113,6 @@ class ChartDataset(torch.utils.data.Dataset):
         return len(self.encodings["labels"])
 
 
-bs = 4
-num_epochs = 3
-# metric = evaluate.load("glue", "mrpc")
-
-
 training_args = Seq2SeqTrainingArguments(
     output_dir='./results/chart_explanation_FlanT5',  # output directory
     per_device_train_batch_size=8,
@@ -164,32 +129,9 @@ training_args = Seq2SeqTrainingArguments(
     save_strategy="epoch",
     save_total_limit=2,
     load_best_model_at_end=True,
-    # metric_for_best_model="overall_f1",
-    # push to hub parameters
-    # report_to="tensorboard",
+    metric_for_best_model="eval_rougeL",
     push_to_hub=False,
-    # hub_strategy="every_save",
-    # hub_model_id=repository_id,
-    # hub_token=HfFolder.get_token(),
 )
-
-# training_args = TrainingArguments(
-#     output_dir='./results/chart_explanation_T5',          # output directory
-#     num_train_epochs=num_epochs,              # total number of training epochs
-#     per_device_train_batch_size=bs,  # batch size per device during training
-#     per_device_eval_batch_size=64,   # batch size for evaluation
-#     warmup_steps=50,                 # number of warmup steps for learning rate scheduler
-#     weight_decay=0.01,               # strength of weight decay
-#     gradient_accumulation_steps=2,
-#     evaluation_strategy="steps",
-#     eval_steps=300,
-#     save_steps=300,
-#     metric_for_best_model="eval_loss",
-#     save_total_limit=1,
-#     load_best_model_at_end=True,
-#     learning_rate=1e-06,
-#     fp16=True,                        # mixed precision training
-# )
 
 
 def train(model, training_args, train_dataset, dev_dataset, test_dataset, only_test=False):
@@ -261,54 +203,12 @@ if __name__ == "__main__":
         pad_to_multiple_of=8
     )
 
-    # train_tokenized = tokenizer(train_input,
-    #                             max_length=max_length,
-    #                             return_token_type_ids=True, truncation=True,
-    #                             padding=True, return_tensors="pt")
-    # test_tokenized = tokenizer(test_input,
-    #                             max_length=max_length,
-    #                             return_token_type_ids=True, truncation=True,
-    #                             padding=True, return_tensors="pt")
-    # val_tokenized = tokenizer(val_input,
-    #                             max_length=max_length,
-    #                             return_token_type_ids=True, truncation=True,
-    #                             padding=True, return_tensors="pt")
-    # train_labels = tokenizer(train_labels,
-    #                          max_length=max_length,
-    #                          return_token_type_ids=True, truncation=True,
-    #                          padding=True, return_tensors="pt")
-    # train_labels[train_labels == tokenizer.pad_token_id] = -100
-    # print(f"type(train_tokenized): {type(train_tokenized)}")
-
     train_dataset = ChartDataset(train_input)
     val_dataset = ChartDataset(val_input)
     test_dataset = ChartDataset(test_input)
-    # test_tokenized = tokenizer(test_input,
-    #                            max_length=max_length,
-    #                            return_token_type_ids=True, truncation=True,
-    #                            padding=True, return_tensors="pt")
-    # test_labels = tokenizer(test_labels,
-    #                         max_length=max_length,
-    #                         return_token_type_ids=True, truncation=True,
-    #                         padding=True, return_tensors="pt")
-    # test_dataset = ChartDataset(test_tokenized, test_labels)
-    # dev_tokenized = tokenizer(val_input,
-    #                           max_length=max_length,
-    #                           return_token_type_ids=True, truncation=True,
-    #                           padding=True, return_tensors="pt")
-    # val_labels = tokenizer(val_labels,
-    #                        max_length=max_length,
-    #                        return_token_type_ids=True, truncation=True,
-    #                        padding=True, return_tensors="pt")
-    # dev_dataset = ChartDataset(dev_tokenized, val_labels)
 
     results_dict = train(model, training_args, train_dataset=train_dataset,
                          dev_dataset=val_dataset, test_dataset=test_dataset, only_test=False)
 
-    # with open("./results/deberta_classification_output.txt", "w") as f:
-    #     for i, logits in enumerate(results_dict.predictions.tolist()):
-    #         predictions = np.argmax(logits, axis=-1)
-    #         if predictions != results_dict.label_ids.tolist()[i]:
-    #             f.write(f"input: {tokenizer.decode(test_dataset[i]['input_ids'])}\n")
-    #             f.write(f"label: {label_dict[results_dict.label_ids.tolist()[i]]}\n")
-    #             f.write(f"prediction: {label_dict[predictions]}\n\n")
+    with open("./results/chart_explanation_FlanT5/test_output.txt", "w") as f:
+        json.dump(results_dict, f, indent=4)

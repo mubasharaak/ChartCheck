@@ -43,6 +43,7 @@ def read_chart_dataset(dataset):
             with open(path_table, "r", encoding="utf-8") as f:
                 table = str(f.readlines())
 
+            # table = "" # using for the hypothesis-only baseline
             claim = str(item["claim"])
             label = str(item["label"])
         except IndexError as e:
@@ -84,7 +85,7 @@ class ChartDataset(torch.utils.data.Dataset):
 
 
 bs = 2
-num_epochs = 15
+num_epochs = 3
 metric = evaluate.load("glue", "mrpc")
 
 training_args = TrainingArguments(
@@ -96,8 +97,8 @@ training_args = TrainingArguments(
     weight_decay=0.01,               # strength of weight decay
     gradient_accumulation_steps=2,
     evaluation_strategy="steps",
-    eval_steps=100,
-    save_steps=100,
+    eval_steps=300,
+    save_steps=300,
     metric_for_best_model="eval_f1_micro",
     save_total_limit=1,
     load_best_model_at_end=True,

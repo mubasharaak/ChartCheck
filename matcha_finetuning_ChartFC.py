@@ -15,33 +15,47 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 
 MAX_PATCHES = 2048
 
-class ChartQADataset(Dataset):
-    def __init__(self, processor, root_dir="ChartQA Dataset", split='train', split2="both"):
+
+class ChartFCDataset(Dataset):
+    def __init__(self, processor, root_dir="ChartFC", split='train', split2="both"):
         """
         Args:
             root_dir (string): Directory with all the ChartQA data.
             split (string): Which split to load ("train" or "val" or "test").
-            split2 (string): Which split to load ("both" or "augmented" or "human") within the first split.
         """
         self.processor = processor
         self.root_dir = root_dir
         self.split = split
-        self.image_dir = os.path.join(self.root_dir, self.split, 'png')
-        
-        self.qa_augmented = []
-        self.qa_human = []
-        # Load questions and answers
-        with open(os.path.join(self.root_dir, self.split, f'{self.split}_augmented.json'), 'r',  encoding='utf-8') as f:
-            self.qa_augmented = json.load(f)
-        with open(os.path.join(self.root_dir, self.split, f'{self.split}_human.json'), 'r', encoding='utf-8') as f:
-            self.qa_human = json.load(f)
+        self.image_dir = root_dir
 
-        if split2 == "both":
-            self.data = self.qa_augmented + self.qa_human
-        elif split2 == "augmented":
-            self.data = self.qa_augmented
-        elif split2 == "human":
-            self.data = self.qa_human
+        if split == 'train':
+          with open("ChartFC/train/train.json", "r") as f:
+            self.data = json.load(f)
+        elif split=="val":
+          with open("ChartFC/val/val.json", "r") as f:
+            self.data = json.load(f)
+        elif split == "test":
+          if split2 == "both":
+            with open("ChartFC/test/test.json", "r") as f:
+              seen= json.load(f)
+            with open("ChartFC/test/test_unseen.json", "r") as f:
+              unseen = json.load(f)
+            self.data = seen + unseen
+          elif split2 == "seen":
+            with open("ChartFC/test/test.json", "r") as f:
+              self.data = json.load(f)
+          elif split2 == "unseen":
+            with open("ChartFC/test/test_unseen.json", "r") as f:
+              self.data = json.load(f)
+
+        for example in self.data:
+          try:
+            imgname = os.path.basename(example["chart_img"])
+            Image.open(f"{self.image_dir}/{imgname}").convert('RGB')
+          except Exception as e:
+            print(example["chart_img"])
+            self.data.remove(example)
+          example["label"] = f"Yes because {example['explanation']}" if example["label"] == "TRUE" else f"No because {example['explanation']}"
         
     def __len__(self):
         return len(self.data)
@@ -49,29 +63,39 @@ class ChartQADataset(Dataset):
     def __getitem__(self, idx):
         qa = self.data[idx]
         # Load image
-        qa["image"] = Image.open(f"{self.image_dir}/{qa['imgname']}").convert('RGB')
+        imgname = os.path.basename(qa["chart_img"])
+        qa["imgname"] = imgname
+        qa["image"] = Image.open(f"{self.image_dir}/{imgname}").convert('RGB')
         return qa
+
+def get_query(claim):
+  question = "Does the chart support the claim:"
+  suffix = "(Yes/No)?"
+  return f"{question} {claim} {suffix}"
+
 
 def collator(batch):
   new_batch = {"flattened_patches":[], "attention_mask":[]}
   images = [item["image"] for item in batch]
-  header_texts = [item["query"] for item in batch]
-  label_texts = [item['label'] for item in batch]
+  header_texts = [get_query(item['claim']) for item in batch]
+  label_texts = [f"{item['label']}" for item in batch] # because {item['explanation']}
   
   inputs = processor(images=images, text=header_texts, return_tensors="pt")
   labels = processor.tokenizer(label_texts, return_tensors="pt", padding=True)
   new_batch["labels"] = labels.input_ids
   new_batch["flattened_patches"] = inputs["flattened_patches"]
   new_batch["attention_mask"] = inputs["attention_mask"]
+  new_batch["header_texts"] = header_texts
+  new_batch["imgname"] = [item["imgname"] for item in batch]
 
 
   return new_batch
 
 batch_size = 4
 
-train_dataset = ChartQADataset(processor, split='train')
+train_dataset = ChartFCDataset(processor, split='train')
 train_dataloader = DataLoader(train_dataset, shuffle=True, batch_size=batch_size, collate_fn=collator)
-val_dataset = ChartQADataset(processor, split='val', split2="human")
+val_dataset = ChartFCDataset(processor, split='val')
 val_dataloader = DataLoader(val_dataset, shuffle=True, batch_size=batch_size, collate_fn=collator)
 
 training_steps = 40000 
@@ -156,7 +180,7 @@ for idx in range(current_step, training_steps):
             'optimizer_state_dict': optimizer.state_dict(),
             'scheduler_state_dict': scheduler.state_dict()
           }
-          checkpoint_name = f'{checkpoint_dir}/checkpoint_training_step_{idx+1}_val_loss_{val_loss_average}.pth'
+          checkpoint_name = f'{checkpoint_dir}/ChartFC_checkpoint_training_step_{idx+1}_val_loss_{val_loss_average}.pth'
           torch.save(checkpoint, checkpoint_name)
           try:
             os.remove(prev_checkpoint_name)

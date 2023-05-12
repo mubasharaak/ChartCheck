@@ -9,7 +9,8 @@ import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trainer, DataCollatorForSeq2Seq
 from transformers import AutoModelForSeq2SeqLM, DataCollatorForSeq2Seq, Seq2SeqTrainingArguments, Seq2SeqTrainer
 from nltk.tokenize import sent_tokenize
-nltk.download("punkt")
+# nltk.download("punkt")
+from sklearn.metrics import f1_score
 
 
 # variables
@@ -27,6 +28,8 @@ label_dict = {
     "No": 1,
     "TRUE": 0,
     "FALSE": 1,
+    "true": 0,
+    "false": 1,
 }
 label_dict_reverse = {
     "Yes": "true",
@@ -76,20 +79,43 @@ def compute_metrics(eval_preds):
 
     # Some simple post-processing
     decoded_preds, decoded_labels = postprocess_text(decoded_preds, decoded_labels)
-    result = metric.compute(predictions=decoded_preds, references=decoded_labels, use_stemmer=True)
+    class_label_preds = [label_dict[entry.lower().split("the claim is ")[1].split(".")[0]] for entry in decoded_preds]
+    class_label_gold = [label_dict[entry.lower().split("the claim is ")[1].split(".")[0]] for entry in decoded_labels]
 
+    result = metric.compute(predictions=decoded_preds, references=decoded_labels, use_stemmer=True)
     result = {k: round(v * 100, 4) for k, v in result.items()}
     prediction_lens = [np.count_nonzero(pred != tokenizer.pad_token_id) for pred in preds]
     result["gen_len"] = np.mean(prediction_lens)
+
+    # classification results
+    f1_micro = f1_score(y_true=class_label_gold, y_pred=class_label_preds, average='micro')
+    f1_macro = f1_score(y_true=class_label_gold, y_pred=class_label_preds, average='macro')
+    result["f1_micro"] = f1_micro
+    result["f1_macro"] = f1_macro
+
     return result
 
 
-def preprocess_function(examples):
+def preprocess_function_explanation(examples):
     inputs = [f"Explain why '{doc['claim']}' is {label_dict_reverse[doc['label']]} given this table: {read_table(doc['chart_img'])}." for doc in examples]
     # inputs = [prefix + doc for doc in examples["document"]]
     model_inputs = tokenizer(inputs, max_length=max_input_length, padding="max_length", truncation=True)
 
     labels = tokenizer(text_target=[doc["explanation"] for doc in examples], max_length=max_target_length, padding="max_length", truncation=True)
+    labels["input_ids"] = [
+        [(l if l != tokenizer.pad_token_id else -100) for l in label] for label in labels["input_ids"]
+    ]
+    model_inputs["labels"] = labels["input_ids"]
+
+    return model_inputs
+
+
+def preprocess_function_classification_explanation(examples):
+    inputs = [f"Classify if claim '{doc['claim']}' is true or false given this table: {read_table(doc['chart_img'])}." for doc in examples]
+    # inputs = [prefix + doc for doc in examples["document"]]
+    model_inputs = tokenizer(inputs, max_length=max_input_length, padding="max_length", truncation=True)
+
+    labels = tokenizer(text_target=[f"The claim is {label_dict_reverse[doc['label']]}. "+doc["explanation"] for doc in examples], max_length=max_target_length, padding="max_length", truncation=True)
     labels["input_ids"] = [
         [(l if l != tokenizer.pad_token_id else -100) for l in label] for label in labels["input_ids"]
     ]
@@ -111,22 +137,24 @@ class ChartDataset(torch.utils.data.Dataset):
 
 
 training_args = Seq2SeqTrainingArguments(
-    output_dir='./results/chart_explanation_FlanT5',  # output directory
+    output_dir='./results/chart_classification_explanation_FlanT5',  # output directory
     per_device_train_batch_size=8,
     per_device_eval_batch_size=8,
     predict_with_generate=True,
     fp16=False, # Overflows with fp16
     learning_rate=5e-5,
-    num_train_epochs=5,
+    num_train_epochs=15,
     # logging & evaluation strategies
-    logging_dir="./results/chart_explanation_FlanT5/logs",
+    logging_dir="./results/chart_classification_explanation_FlanT5/logs",
     logging_strategy="steps",
-    logging_steps=500,
-    evaluation_strategy="epoch",
-    save_strategy="epoch",
-    save_total_limit=2,
+    logging_steps=100,
+    eval_steps=100,
+    save_steps=100,
+    evaluation_strategy="steps",
+    save_strategy="steps",
+    save_total_limit=1,
     load_best_model_at_end=True,
-    metric_for_best_model="eval_rougeL",
+    metric_for_best_model="eval_loss",
     push_to_hub=False,
 )
 
@@ -143,7 +171,7 @@ def train(model, training_args, train_dataset, dev_dataset, test_dataset, only_t
 
     if not only_test:
         trainer.train()
-        trainer.save_model("./results/chart_explanation_FlanT5")
+        trainer.save_model("./results/chart_classification_explanation_FlanT5")
 
     result_dict = trainer.predict(test_dataset)
     print(result_dict.metrics)
@@ -184,9 +212,9 @@ if __name__ == "__main__":
     test_data = data[test_indices]
 
     # Dataset preperation
-    train_input = preprocess_function(train_data)
-    test_input = preprocess_function(test_data)
-    val_input = preprocess_function(val_data)
+    train_input = preprocess_function_classification_explanation(train_data)
+    test_input = preprocess_function_classification_explanation(test_data)
+    val_input = preprocess_function_classification_explanation(val_data)
 
     print(f"val input: {len(val_input)}")
 
@@ -207,5 +235,5 @@ if __name__ == "__main__":
     results_dict = train(model, training_args, train_dataset=train_dataset,
                          dev_dataset=val_dataset, test_dataset=test_dataset, only_test=False)
 
-    with open("./results/chart_explanation_FlanT5/test_output.txt", "w") as f:
+    with open("./results/chart_classification_explanation_FlanT5/test_output.txt", "w") as f:
         json.dump(results_dict, f, indent=4)

@@ -3,20 +3,16 @@ from torch.utils.data import Dataset, DataLoader
 from transformers import AutoProcessor, Pix2StructForConditionalGeneration
 from transformers.optimization import Adafactor, get_cosine_schedule_with_warmup
 import json
-from PIL import Image
+import cv2
+from PIL import Image, UnidentifiedImageError
 import os
 import torch
 from evaluate import load
 from itertools import cycle
-from transformers.models.pix2struct.image_processing_pix2struct import render_text
 
-processor = AutoProcessor.from_pretrained("google/matcha-base")
-model = Pix2StructForConditionalGeneration.from_pretrained("google/matcha-base")
-device = "cuda" if torch.cuda.is_available() else "cpu"
-
-with open("claim_explanation_verification_pre_tasksets.json", "r") as f:
-  data = json.load(f)
-
+processor = AutoProcessor.from_pretrained("google/matcha-chartqa")
+model = Pix2StructForConditionalGeneration.from_pretrained("google/matcha-chartqa")
+device = "cuda:0"#"cuda" if torch.cuda.is_available() else "cpu"
 
 MAX_PATCHES = 2048
 
@@ -30,45 +26,6 @@ def convert_RGBA(img):
 
     return rgb_image
 
-class ChartQADataset(Dataset):
-    def __init__(self, processor, root_dir="ChartQA Dataset", split='train', split2="both"):
-        """
-        Args:
-            root_dir (string): Directory with all the ChartQA data.
-            split (string): Which split to load ("train" or "val" or "test").
-            split2 (string): Which split to load ("both" or "augmented" or "human") within the first split.
-        """
-        self.processor = processor
-        self.root_dir = root_dir
-        self.split = split
-        self.image_dir = os.path.join(self.root_dir, self.split, 'png')
-        
-        self.qa_augmented = []
-        self.qa_human = []
-        # Load questions and answers
-        with open(os.path.join(self.root_dir, self.split, f'{self.split}_augmented.json'), 'r',  encoding='utf-8') as f:
-            self.qa_augmented = json.load(f)
-        with open(os.path.join(self.root_dir, self.split, f'{self.split}_human.json'), 'r', encoding='utf-8') as f:
-            self.qa_human = json.load(f)
-
-        if split2 == "both":
-            self.data = self.qa_augmented + self.qa_human
-        elif split2 == "augmented":
-            self.data = self.qa_augmented
-        elif split2 == "human":
-            self.data = self.qa_humana
-
-        self.data = [example for example in self.data if example["label"] in ["Yes","No"]]
-        print(len(self.data))
-        
-    def __len__(self):
-        return len(self.data)
-        
-    def __getitem__(self, idx):
-        qa = self.data[idx]
-        # Load image
-        qa["image"] = Image.open(f"{self.image_dir}/{qa['imgname']}").convert('RGB')
-        return qa
 
 class ChartFCDataset(Dataset):
     def __init__(self, processor, root_dir="ChartFC", split='train', split2="both", convert_image=True):
@@ -84,31 +41,24 @@ class ChartFCDataset(Dataset):
         self.convert_image = convert_image
 
         if split == 'train':
-          with open("ChartFC/train/train.json", "r") as f:
+          with open("claim_explanation_verification_pre_tasksets_train.json", "r") as f:
             self.data = json.load(f)
         elif split=="val":
-          with open("ChartFC/val/val.json", "r") as f:
+          with open("claim_explanation_verification_pre_tasksets_validation.json", "r") as f:
             self.data = json.load(f)
         elif split == "test":
           if split2 == "both":
-            with open("ChartFC/test/test.json", "r") as f:
+            with open("claim_explanation_verification_pre_tasksets_test.json", "r") as f:
               seen= json.load(f)
-            with open("ChartFC/test/test_unseen.json", "r") as f:
+            with open("claim_explanation_verification_pre_tasksets_test_two.json", "r") as f:
               unseen = json.load(f)
             self.data = seen + unseen
           elif split2 == "seen":
-            with open("ChartFC/test/test.json", "r") as f:
+            with open("claim_explanation_verification_pre_tasksets_test.json", "r") as f:
               self.data = json.load(f)
           elif split2 == "unseen":
-            with open("ChartFC/test/test_unseen.json", "r") as f:
+            with open("claim_explanation_verification_pre_tasksets_test_two.json", "r") as f:
               self.data = json.load(f)
-        for example in self.data:
-          try:
-            imgname = os.path.basename(example["chart_img"])
-            Image.open(f"{self.image_dir}/{imgname}").convert('RGB')
-          except Exception as e:
-            print(example["chart_img"])
-            self.data.remove(example)
         
     def __len__(self):
         return len(self.data)
@@ -118,55 +68,48 @@ class ChartFCDataset(Dataset):
         # Load image
         imgname = os.path.basename(qa["chart_img"])
         qa["imgname"] = imgname
-        img = render_text(f"Is the following claim correct: {qa['claim']}")
-        #img = Image.open(f"{self.image_dir}/{imgname}")
+        img = Image.open(f"{self.image_dir}/{imgname}")
         if self.convert_image and img.mode == "RGBA":
-            qa["image"] = convert_RGBA(img)
+          qa["image"] = convert_RGBA(img)
         else:
-            qa["image"] = img.convert("RGB")
+          qa["image"] = img.convert("RGB")
         return qa
 
-def get_final_label(label, expl):
+def get_final_label(label, expl=""):
   label = "Yes" if label == "TRUE" else "No"
-  return f"{label}"
- #return f"{label} because {expl}"
+  if expl:
+    return f"{label}. Explanation: {expl}"
+  else:
+    return f"{label}"
 
-def get_query(claim):
-  question = "Does the chart support the claim: "
-  #question = ""
-  suffix = ""
-  return f"{question}{claim}{suffix}"
 
+explanation_pct = 0.5
 
 def collator(batch):
   new_batch = {"flattened_patches":[], "attention_mask":[]}
   images = [item["image"] for item in batch]
-  #header_texts = [get_query(item['claim']) for item in batch]
-  header_texts =["" for i in batch] 
-  label_texts = [get_final_label(item['label'],item['explanation']) for item in batch] #   
-  #label_texts = [get_final_label(item['label'],"") for item in batch] #   
-  inputs = processor(images=images, text=header_texts , return_tensors="pt")
+  if np.random.rand() > explanation_pct:
+    header_texts = [f"The chart below has the following caption: {item['caption']}. Given the caption and the chart below, is the following claim true: {item['claim']}?" for item in batch]
+    label_texts = [get_final_label(item["label"]) for item in batch] #   
+  else:
+    header_texts = [f"The chart below has the following caption: {item['caption']}. Given the caption and the chart below, is the following claim true: {item['claim']}? Explain why?" for item in batch]
+    label_texts = [get_final_label(item['label'],item['explanation']) for item in batch]
+  inputs = processor(images=images, text=header_texts , return_tensors="pt", font_path="./Arial.ttf")
   labels = processor.tokenizer(label_texts, return_tensors="pt", padding=True)
   new_batch["labels"] = labels.input_ids
   new_batch["flattened_patches"] = inputs["flattened_patches"]
   new_batch["attention_mask"] = inputs["attention_mask"]
   new_batch["header_texts"] = header_texts
   new_batch["imgname"] = [item["imgname"] for item in batch]
-
+  
   return new_batch
 
 batch_size = 4
-
-
 
 train_dataset = ChartFCDataset(processor, split='train')
 train_dataloader = DataLoader(train_dataset, shuffle=True, batch_size=batch_size, collate_fn=collator)
 val_dataset = ChartFCDataset(processor, split='val')
 val_dataloader = DataLoader(val_dataset, shuffle=True, batch_size=batch_size, collate_fn=collator)
-#train_dataset = ChartQADataset(processor, split='train')
-#train_dataloader = DataLoader(train_dataset, shuffle=True, batch_size=batch_size, collate_fn=collator)
-#val_dataset = ChartQADataset(processor, split='val')
-#val_dataloader = DataLoader(val_dataset, shuffle=True, batch_size=batch_size, collate_fn=collator)
 
 training_steps = 15000 
 checkpoint_steps = 300
@@ -192,7 +135,7 @@ model.train()
 prev_val_loss = float("inf")
 prev_checkpoint_name = ""
 
-experiment_name = "chartfc_text_only"
+experiment_name = "chartfc_chartqa"
 
 current_step=0
 generator = iter(train_dataloader)
@@ -213,9 +156,6 @@ for idx in range(current_step, training_steps):
   outputs = model(flattened_patches=flattened_patches,
                   attention_mask=attention_mask,
                   labels=masked_labels)
-  weight = torch.ones(len(processor.tokenizer.vocab)-100).to(torch.float).to(device)
-  weight[[processor.tokenizer.vocab["Yes"], processor.tokenizer.vocab["No"]]] = 0.9 * len(processor.tokenizer.vocab)
-  #loss = torch.nn.functional.cross_entropy(outputs.logits.contiguous().view(-1, outputs.logits.size(-1)), masked_labels.contiguous().view(-1), weight=weight, reduction='sum')
   loss = torch.nn.functional.cross_entropy(outputs.logits.contiguous().view(-1, outputs.logits.size(-1)), masked_labels.contiguous().view(-1))
   loss.backward()
 
@@ -228,6 +168,7 @@ for idx in range(current_step, training_steps):
   if (idx+1) % checkpoint_steps == 0:
       with torch.no_grad():
         model.eval()
+        np.random.seed(321)
 
         val_loss = []
         val_batch_size = []
@@ -241,9 +182,6 @@ for idx in range(current_step, training_steps):
           outputs = model(flattened_patches=flattened_patches,
                     attention_mask=attention_mask,
                     labels=masked_labels)
-          weight = torch.ones(len(processor.tokenizer.vocab) - 100).to(torch.float).to(device)
-          weight[[processor.tokenizer.vocab["Yes"], processor.tokenizer.vocab["No"]]] = 0.9 * len(processor.tokenizer.vocab)
-          #loss = torch.nn.functional.cross_entropy(outputs.logits.contiguous().view(-1, outputs.logits.size(-1)), masked_labels.contiguous().view(-1), weight=weight, reduction='sum')
           loss = torch.nn.functional.cross_entropy(outputs.logits.contiguous().view(-1, outputs.logits.size(-1)), masked_labels.contiguous().view(-1))
           curr_val_loss = loss.item()
           val_loss.append(curr_val_loss)

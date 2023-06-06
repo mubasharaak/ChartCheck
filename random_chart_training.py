@@ -10,9 +10,9 @@ import torch
 from evaluate import load
 from itertools import cycle
 
-processor = AutoProcessor.from_pretrained("google/matcha-chartqa")
-model = Pix2StructForConditionalGeneration.from_pretrained("google/matcha-chartqa")
-device = "cuda:0"#"cuda" if torch.cuda.is_available() else "cpu"
+processor = AutoProcessor.from_pretrained("google/matcha-base")
+model = Pix2StructForConditionalGeneration.from_pretrained("google/matcha-base")
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 MAX_PATCHES = 2048
 
@@ -26,6 +26,45 @@ def convert_RGBA(img):
 
     return rgb_image
 
+class ChartQADataset(Dataset):
+    def __init__(self, processor, root_dir="ChartQA Dataset", split='train', split2="both"):
+        """
+        Args:
+            root_dir (string): Directory with all the ChartQA data.
+            split (string): Which split to load ("train" or "val" or "test").
+            split2 (string): Which split to load ("both" or "augmented" or "human") within the first split.
+        """
+        self.processor = processor
+        self.root_dir = root_dir
+        self.split = split
+        self.image_dir = os.path.join(self.root_dir, self.split, 'png')
+        
+        self.qa_augmented = []
+        self.qa_human = []
+        # Load questions and answers
+        with open(os.path.join(self.root_dir, self.split, f'{self.split}_augmented.json'), 'r',  encoding='utf-8') as f:
+            self.qa_augmented = json.load(f)
+        with open(os.path.join(self.root_dir, self.split, f'{self.split}_human.json'), 'r', encoding='utf-8') as f:
+            self.qa_human = json.load(f)
+
+        if split2 == "both":
+            self.data = self.qa_augmented + self.qa_human
+        elif split2 == "augmented":
+            self.data = self.qa_augmented
+        elif split2 == "human":
+            self.data = self.qa_humana
+
+        self.data = [example for example in self.data if example["label"] in ["Yes","No"]]
+        print(len(self.data))
+        
+    def __len__(self):
+        return len(self.data)
+        
+    def __getitem__(self, idx):
+        qa = self.data[idx]
+        # Load image
+        qa["image"] = Image.open(f"{self.image_dir}/{qa['imgname']}").convert('RGB')
+        return qa
 
 class ChartFCDataset(Dataset):
     def __init__(self, processor, root_dir="ChartFC", split='train', split2="both", convert_image=True):
@@ -65,9 +104,11 @@ class ChartFCDataset(Dataset):
         
     def __getitem__(self, idx):
         qa = self.data[idx]
+        random = np.random.choice(self.data)
         # Load image
-        imgname = os.path.basename(qa["chart_img"])
+        imgname = os.path.basename(random["chart_img"])
         qa["imgname"] = imgname
+        qa["caption"] = random["caption"]
         img = Image.open(f"{self.image_dir}/{imgname}")
         if self.convert_image and img.mode == "RGBA":
           qa["image"] = convert_RGBA(img)
@@ -110,6 +151,10 @@ train_dataset = ChartFCDataset(processor, split='train')
 train_dataloader = DataLoader(train_dataset, shuffle=True, batch_size=batch_size, collate_fn=collator)
 val_dataset = ChartFCDataset(processor, split='val')
 val_dataloader = DataLoader(val_dataset, shuffle=True, batch_size=batch_size, collate_fn=collator)
+#train_dataset = ChartQADataset(processor, split='train')
+#train_dataloader = DataLoader(train_dataset, shuffle=True, batch_size=batch_size, collate_fn=collator)
+#val_dataset = ChartQADataset(processor, split='val')
+#val_dataloader = DataLoader(val_dataset, shuffle=True, batch_size=batch_size, collate_fn=collator)
 
 training_steps = 15000 
 checkpoint_steps = 300
@@ -135,7 +180,7 @@ model.train()
 prev_val_loss = float("inf")
 prev_checkpoint_name = ""
 
-experiment_name = "chartfc_chartqa"
+experiment_name = "chartfc_random_chart"
 
 current_step=0
 generator = iter(train_dataloader)
@@ -156,6 +201,9 @@ for idx in range(current_step, training_steps):
   outputs = model(flattened_patches=flattened_patches,
                   attention_mask=attention_mask,
                   labels=masked_labels)
+  weight = torch.ones(len(processor.tokenizer.vocab)-100).to(torch.float).to(device)
+  weight[[processor.tokenizer.vocab["Yes"], processor.tokenizer.vocab["No"]]] = 0.9 * len(processor.tokenizer.vocab)
+  #loss = torch.nn.functional.cross_entropy(outputs.logits.contiguous().view(-1, outputs.logits.size(-1)), masked_labels.contiguous().view(-1), weight=weight, reduction='sum')
   loss = torch.nn.functional.cross_entropy(outputs.logits.contiguous().view(-1, outputs.logits.size(-1)), masked_labels.contiguous().view(-1))
   loss.backward()
 
@@ -182,6 +230,9 @@ for idx in range(current_step, training_steps):
           outputs = model(flattened_patches=flattened_patches,
                     attention_mask=attention_mask,
                     labels=masked_labels)
+          weight = torch.ones(len(processor.tokenizer.vocab) - 100).to(torch.float).to(device)
+          weight[[processor.tokenizer.vocab["Yes"], processor.tokenizer.vocab["No"]]] = 0.9 * len(processor.tokenizer.vocab)
+          #loss = torch.nn.functional.cross_entropy(outputs.logits.contiguous().view(-1, outputs.logits.size(-1)), masked_labels.contiguous().view(-1), weight=weight, reduction='sum')
           loss = torch.nn.functional.cross_entropy(outputs.logits.contiguous().view(-1, outputs.logits.size(-1)), masked_labels.contiguous().view(-1))
           curr_val_loss = loss.item()
           val_loss.append(curr_val_loss)
@@ -207,4 +258,4 @@ for idx in range(current_step, training_steps):
         model.train()
   
   if idx+1 == training_steps:
-    break
+      break

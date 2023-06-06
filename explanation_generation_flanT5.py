@@ -1,5 +1,6 @@
 import json
 import os
+import re
 
 import evaluate
 import nltk
@@ -14,14 +15,11 @@ from sklearn.metrics import f1_score
 
 
 # variables
-max_length = 1024
-train_dataset_path = os.path.join("data", "")
-test_dataset_path = os.path.join("data", "")
-dev_dataset_path = os.path.join("data", "")
-# metric = load_metric("rouge")
-metric = evaluate.load("rouge")
-
-DATASET_PATH = "claim_explanation_verification_pre_tasksets.json"
+max_length = 2048
+DATASET_PATH_TRAIN = "dataset/claim_explanation_verification_pre_tasksets_train_V2.json"
+DATASET_PATH_VAL = "dataset/claim_explanation_verification_pre_tasksets_validation_V2.json"
+DATASET_PATH_TEST = "dataset/claim_explanation_verification_pre_tasksets_test_V2.json"
+DATASET_PATH_TEST_TWO = "dataset/claim_explanation_verification_pre_tasksets_test_two_V2.json"
 
 label_dict = {
     "Yes": 0,
@@ -37,6 +35,27 @@ label_dict_reverse = {
     "TRUE": "true",
     "FALSE": "false",
 }
+
+init_prompt_few_shot = """
+Given a claim, a table and it's caption, decide if the claim is true or false. 
+
+Examples: 
+Classify and explain if claim 'Coal is the second-lowest source of energy for electricity production in Romania.' is true or false given this caption: 'Electricity production in Romania by source of energy.' and this table: 'TITLE | \n Other | 2 \n Hydro | 36% \n Coal | 33% \n Nuclear | 19% \n Gas | 10%'.
+Answer: The claim is false. The chart shows that Coal contributes to 33% of the electricity production in Romania, which is the second-highest percentage among all the sources of energy listed in the chart.
+
+Classify and explain if claim 'Hydro is the primary source of energy for electricity production in Romania.' is true or false given this caption: 'Electricity production in Romania by source of energy.' and this table: 'TITLE | \n Other | 2 \n Hydro | 36% \n Coal | 33% \n Nuclear | 19% \n Gas | 10%'.
+Answer: The claim is true. The chart shows that Hydro contributes to 36% of the electricity production in Romania, which is the highest percentage among all the sources of energy listed in the chart. 
+
+Complete the following:
+
+"""
+
+init_prompt_zero_shot = """
+Given a claim, a table and it's caption, decide if the claim is true or false. 
+
+Complete the following:
+
+"""
 
 
 # functions
@@ -79,25 +98,86 @@ def compute_metrics(eval_preds):
 
     # Some simple post-processing
     decoded_preds, decoded_labels = postprocess_text(decoded_preds, decoded_labels)
-    class_label_preds = [label_dict[entry.lower().split("the claim is ")[1].split(".")[0]] for entry in decoded_preds]
-    class_label_gold = [label_dict[entry.lower().split("the claim is ")[1].split(".")[0]] for entry in decoded_labels]
+    if not ONLY_EXPLANATION:
+        class_label_preds = []
+        class_label_gold = []
+        for i, entry in enumerate(decoded_preds):
+            if "true" in entry.lower():
+                class_label_preds.append(label_dict["true"])
+                gold_answer = decoded_labels[i].lower().split("the claim is ")[1].split(".")[0]
+                class_label_gold.append(label_dict[gold_answer])
+            elif "false" in entry.lower():
+                class_label_preds.append(label_dict["false"])
+                gold_answer = decoded_labels[i].lower().split("the claim is ")[1].split(".")[0]
+                class_label_gold.append(label_dict[gold_answer])
+            else:
+                continue
 
+    # class_label_preds = [label_dict[entry.lower().split("the claim is ")[1].split(".")[0]] for entry in decoded_preds]
+    # class_label_gold = [label_dict[entry.lower().split("the claim is ")[1].split(".")[0]] for entry in decoded_labels]
+
+    # rouge
+    metric = evaluate.load("rouge")
     result = metric.compute(predictions=decoded_preds, references=decoded_labels, use_stemmer=True)
     result = {k: round(v * 100, 4) for k, v in result.items()}
     prediction_lens = [np.count_nonzero(pred != tokenizer.pad_token_id) for pred in preds]
     result["gen_len"] = np.mean(prediction_lens)
 
-    # classification results
-    f1_micro = f1_score(y_true=class_label_gold, y_pred=class_label_preds, average='micro')
-    f1_macro = f1_score(y_true=class_label_gold, y_pred=class_label_preds, average='macro')
-    result["f1_micro"] = f1_micro
-    result["f1_macro"] = f1_macro
+    # bleu
+    metric = evaluate.load("bleu")
+    result_bleu = metric.compute(predictions=decoded_preds, references=decoded_labels)
+    result.update(result_bleu)
+
+    # bertscore
+    metric = evaluate.load("bertscore")
+    result_bertscore = metric.compute(predictions=decoded_preds, references=decoded_labels, lang="en")
+    result_bertscore = {k: sum(v)/len(v) for k, v in result_bertscore.items() if k in ['precision', 'recall', 'f1']}
+    result_bertscore["bertscore_precision"] = result_bertscore.pop("precision")
+    result_bertscore["bertscore_recall"] = result_bertscore.pop("recall")
+    result_bertscore["bertscore_f1"] = result_bertscore.pop("f1")
+    result.update(result_bertscore)
+
+    # meteor
+    metric = evaluate.load("meteor")
+    result_meteor = metric.compute(predictions=decoded_preds, references=decoded_labels)
+    result.update(result_meteor)
+
+    # bleurt
+    metric = evaluate.load('bleurt')
+    result_bleurt = metric.compute(predictions=decoded_preds, references=decoded_labels)
+    result_bleurt = {k: sum(v)/len(v) for k, v in result_bleurt.items()}
+    result_bleurt["bleurt"] = result_bleurt.pop("scores")
+    result.update(result_bleurt)
+
+    if not ONLY_EXPLANATION:
+        # classification results
+        f1_micro = f1_score(y_true=class_label_gold, y_pred=class_label_preds, average='micro')
+        f1_macro = f1_score(y_true=class_label_gold, y_pred=class_label_preds, average='macro')
+        result["f1_micro"] = f1_micro
+        result["f1_macro"] = f1_macro
 
     return result
 
 
-def preprocess_function_explanation(examples):
-    inputs = [f"Explain why '{doc['claim']}' is {label_dict_reverse[doc['label']]} given this table: {read_table(doc['chart_img'])}." for doc in examples]
+def preprocess_claim_for_pred_label(claim):
+    return re.sub(r'\s+([.,])', r'\1', re.sub(' +', ' ', str(claim).strip()))
+
+
+def preprocess_function_explanation(examples, is_testset=False, is_testset_two=False):
+    if CLASSIFICATIONS_BY.lower() == "deberta" and (is_testset or is_testset_two):
+        if is_testset:
+            inputs = [
+
+                f"Explain why '{doc['claim']}' is {dict_test_pred[preprocess_claim_for_pred_label(doc['claim'])]} given this caption: {doc['caption']} and table: {read_table(doc['chart_img'])}."
+                for doc in examples]
+
+        else: # is_testset_two
+            inputs = [
+                f"Explain why '{doc['claim']}' is {dict_test_two_pred[preprocess_claim_for_pred_label(doc['claim'])]} given this caption: {doc['caption']} and table: {read_table(doc['chart_img'])}."
+                for doc in examples]
+    else: # training or val set
+        inputs = [f"Explain why '{doc['claim']}' is {label_dict_reverse[doc['label']]} given this caption: {doc['caption']} and table: {read_table(doc['chart_img'])}." for doc in examples]
+
     # inputs = [prefix + doc for doc in examples["document"]]
     model_inputs = tokenizer(inputs, max_length=max_input_length, padding="max_length", truncation=True)
 
@@ -110,11 +190,18 @@ def preprocess_function_explanation(examples):
     return model_inputs
 
 
-def preprocess_function_classification_explanation(examples):
-    inputs = [f"Classify if claim '{doc['claim']}' is true or false given this table: {read_table(doc['chart_img'])}." for doc in examples]
+def preprocess_function_classification_explanation(examples, training_setting = "finetune"):
+    if training_setting == "finetune":
+        inputs = [f"Classify and explain if claim '{doc['claim']}' is true or false given this caption: {doc['caption']} and this table: {read_table(doc['chart_img'])}.\n Answer:" for doc in examples]
+    elif training_setting == "fewshot":
+        inputs = [f"{init_prompt_few_shot} Classify and explain if claim '{doc['claim']}' is true or false given this caption: {doc['caption']} and this table: {read_table(doc['chart_img'])}.\n Answer:" for doc in examples]
+    elif training_setting == "zeroshot":
+        inputs = [f"{init_prompt_zero_shot} Classify and explain if claim '{doc['claim']}' is true or false given this caption: {doc['caption']} and this table: {read_table(doc['chart_img'])}.\n Answer:" for doc in examples]
+
     # inputs = [prefix + doc for doc in examples["document"]]
     model_inputs = tokenizer(inputs, max_length=max_input_length, padding="max_length", truncation=True)
 
+    # Input instructioon: "The claim is {label}. {explanation}"
     labels = tokenizer(text_target=[f"The claim is {label_dict_reverse[doc['label']]}. "+doc["explanation"] for doc in examples], max_length=max_target_length, padding="max_length", truncation=True)
     labels["input_ids"] = [
         [(l if l != tokenizer.pad_token_id else -100) for l in label] for label in labels["input_ids"]
@@ -136,30 +223,7 @@ class ChartDataset(torch.utils.data.Dataset):
         return len(self.encodings["labels"])
 
 
-training_args = Seq2SeqTrainingArguments(
-    output_dir='./results/chart_classification_explanation_FlanT5',  # output directory
-    per_device_train_batch_size=8,
-    per_device_eval_batch_size=8,
-    predict_with_generate=True,
-    fp16=False, # Overflows with fp16
-    learning_rate=5e-5,
-    num_train_epochs=15,
-    # logging & evaluation strategies
-    logging_dir="./results/chart_classification_explanation_FlanT5/logs",
-    logging_strategy="steps",
-    logging_steps=100,
-    eval_steps=100,
-    save_steps=100,
-    evaluation_strategy="steps",
-    save_strategy="steps",
-    save_total_limit=1,
-    load_best_model_at_end=True,
-    metric_for_best_model="eval_loss",
-    push_to_hub=False,
-)
-
-
-def train(model, training_args, train_dataset, dev_dataset, test_dataset, only_test=False):
+def train(model, training_args, train_dataset, dev_dataset, test_dataset, save_path, only_test=False):
     trainer = Seq2SeqTrainer(
         model=model,
         args=training_args,
@@ -171,7 +235,7 @@ def train(model, training_args, train_dataset, dev_dataset, test_dataset, only_t
 
     if not only_test:
         trainer.train()
-        trainer.save_model("./results/chart_classification_explanation_FlanT5")
+        trainer.save_model(save_path)
 
     result_dict = trainer.predict(test_dataset)
     print(result_dict.metrics)
@@ -180,43 +244,89 @@ def train(model, training_args, train_dataset, dev_dataset, test_dataset, only_t
 
 
 if __name__ == "__main__":
+    # Set variables
+    FINETUNING = True
+    FEWSHOT = False
+    ZEROSHOT = False
+    ONLY_EXPLANATION = True
+    CLASSIFICATIONS_BY = "deberta"
+
+    if FINETUNING:
+        hg_model_hub_name = "google/flan-t5-base"
+    else:
+        hg_model_hub_name = "google/flan-t5-xl"
     # Load model
-    hg_model_hub_name = "google/flan-t5-base"
     tokenizer = AutoTokenizer.from_pretrained(hg_model_hub_name)
     model = AutoModelForSeq2SeqLM.from_pretrained(hg_model_hub_name)
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     model.to(device)
     model.train()
 
-    # load file
-    with open(DATASET_PATH, "r", encoding="utf-8") as file:
-        data = json.load(file)
+    # load files (train, validation, first and second test set)
+    with open(DATASET_PATH_TRAIN, "r", encoding="utf-8") as file:
+        train_data = json.load(file)
 
-    np.random.seed(42)
-    data = np.array(data)
+    with open(DATASET_PATH_VAL, "r", encoding="utf-8") as file:
+        val_data = json.load(file)
 
-    # Shuffle the indices of the data
-    indices = np.random.permutation(len(data))
+    with open(DATASET_PATH_TEST, "r", encoding="utf-8") as file:
+        test_data = json.load(file)
 
-    # Calculate the number of samples in the training, validation, and testing sets
-    num_train = int(0.8 * len(data))
-    num_val = int(0.1 * len(data))
+    with open(DATASET_PATH_TEST_TWO, "r", encoding="utf-8") as file:
+        test_two_data = json.load(file)
 
-    # Split the indices into training, validation, and testing sets
-    train_indices = indices[:num_train]
-    val_indices = indices[num_train:num_train + num_val]
-    test_indices = indices[num_train + num_val:]
+    # load and replace labels for DeBERTa/TAPAS classification for testsets
+    if CLASSIFICATIONS_BY.lower() == "deberta":
+        with open("/users/k20116188/projects/chartcheck/ChartFC/results/chart_table_classification_DeBERTa/output_test.txt", "r", encoding="utf-8") as file:
+            test_predictions = file.readlines()
+        dict_test_pred = {}
+        for i, entry in enumerate(test_predictions):
+            if entry.startswith("input"):
+                claim = entry.split("[CLS]")[1].split("[SEP]")[0].strip()
+                claim = re.sub(' +', ' ', claim)
+                if "false" in test_predictions[i + 2].lower():
+                    pred_label = "False"
+                else:
+                    pred_label = "True"
+                dict_test_pred[str(claim)] = pred_label
 
-    train_data = data[train_indices]
-    val_data = data[val_indices]
-    test_data = data[test_indices]
+        with open("/users/k20116188/projects/chartcheck/ChartFC/results/chart_table_classification_DeBERTa/output_test_two.txt", "r", encoding="utf-8") as file:
+            test_two_predictions = file.readlines()
+        dict_test_two_pred = {}
+        for i, entry in enumerate(test_two_predictions):
+            if entry.startswith("input"):
+                claim = entry.split("[CLS]")[1].split("[SEP]")[0].strip()
+                claim = re.sub(' +', ' ', claim)
+                if "false" in test_two_predictions[i + 2].lower():
+                    pred_label = "False"
+                else:
+                    pred_label = "True"
+                dict_test_two_pred[str(claim)] = pred_label
 
     # Dataset preperation
-    train_input = preprocess_function_classification_explanation(train_data)
-    test_input = preprocess_function_classification_explanation(test_data)
-    val_input = preprocess_function_classification_explanation(val_data)
-
-    print(f"val input: {len(val_input)}")
+    if ONLY_EXPLANATION:
+        train_input = preprocess_function_explanation(train_data)
+        val_input = preprocess_function_explanation(val_data)
+        test_input = preprocess_function_explanation(test_data, is_testset=True)
+        test_two_input = preprocess_function_explanation(test_two_data, is_testset_two=True)
+    else:
+        if FINETUNING:
+            train_input = preprocess_function_classification_explanation(train_data, "finetune")
+            test_input = preprocess_function_classification_explanation(test_data, "finetune")
+            test_two_input = preprocess_function_classification_explanation(test_two_data, "finetune")
+            val_input = preprocess_function_classification_explanation(val_data, "finetune")
+        elif FEWSHOT:
+            train_input = preprocess_function_classification_explanation(train_data, "fewshot")
+            test_input = preprocess_function_classification_explanation(test_data, "fewshot")
+            test_two_input = preprocess_function_classification_explanation(test_two_data, "fewshot")
+            val_input = preprocess_function_classification_explanation(val_data, "fewshot")
+        elif ZEROSHOT:
+            train_input = preprocess_function_classification_explanation(train_data, "zeroshot")
+            test_input = preprocess_function_classification_explanation(test_data, "zeroshot")
+            test_two_input = preprocess_function_classification_explanation(test_two_data, "zeroshot")
+            val_input = preprocess_function_classification_explanation(val_data, "zeroshot")
+        else:
+            print("Error: Training setting is missing!")
 
     # we want to ignore tokenizer pad token in the loss
     label_pad_token_id = -100
@@ -231,9 +341,58 @@ if __name__ == "__main__":
     train_dataset = ChartDataset(train_input)
     val_dataset = ChartDataset(val_input)
     test_dataset = ChartDataset(test_input)
+    test_two_dataset = ChartDataset(test_two_input)
 
-    results_dict = train(model, training_args, train_dataset=train_dataset,
-                         dev_dataset=val_dataset, test_dataset=test_dataset, only_test=False)
+    task = "explanation_only" if ONLY_EXPLANATION else "classification_explanation"
+    if FINETUNING:
+        if CLASSIFICATIONS_BY.lower() == "deberta":
+            output_path = f"/scratch/users/k20116188/chart-fact-checking/chart_{task}_FlanT5_finetune_deberta_classification"
+        else:
+            output_path = f"/scratch/users/k20116188/chart-fact-checking/chart_{task}_FlanT5_finetune"
+    elif FEWSHOT:
+        output_path = f"/scratch/users/k20116188/chart-fact-checking/chart_{task}_FlanT5_fewshot_2shots"
+    elif ZEROSHOT:
+        output_path = f"/scratch/users/k20116188/chart-fact-checking/chart_{task}_FlanT5_zeroshot"
 
-    with open("./results/chart_classification_explanation_FlanT5/test_output.txt", "w") as f:
-        json.dump(results_dict, f, indent=4)
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
+    path_test_output = os.path.join(output_path, "test_output.txt")
+    path_test_two_output = os.path.join(output_path, "test_two_output.txt")
+
+    training_args = Seq2SeqTrainingArguments(
+        output_dir=output_path,  # output directory
+        per_device_train_batch_size=8,
+        per_device_eval_batch_size=8,
+        predict_with_generate=True,
+        fp16=False,  # Overflows with fp16
+        learning_rate=5e-5,
+        num_train_epochs=10,
+        logging_strategy="steps",
+        logging_steps=100,
+        logging_dir=os.path.join(output_path, "logs"),
+        eval_steps=100,
+        save_steps=100,
+        evaluation_strategy="steps",
+        save_strategy="steps",
+        save_total_limit=1,
+        load_best_model_at_end=True,
+        metric_for_best_model="eval_loss",
+        push_to_hub=False,
+    )
+
+    if FINETUNING:
+        results_dict = train(model, training_args, train_dataset=train_dataset,
+                             dev_dataset=val_dataset, test_dataset=test_dataset, save_path=output_path, only_test=False)
+        results_dict_two = train(model, training_args, train_dataset=train_dataset,
+                             dev_dataset=val_dataset, test_dataset=test_two_dataset, save_path=output_path, only_test=True)
+    else:
+        results_dict = train(model, training_args, train_dataset=train_dataset,
+                             dev_dataset=val_dataset, test_dataset=test_dataset, save_path=output_path, only_test=True)
+        results_dict_two = train(model, training_args, train_dataset=train_dataset,
+                             dev_dataset=val_dataset, test_dataset=test_two_dataset, save_path=output_path, only_test=True)
+
+    with open(path_test_output, "w") as f:
+        f.write(f"result_dict.metrics: {results_dict.metrics}\n\n")
+
+    with open(path_test_two_output, "w") as f:
+        f.write(f"result_dict.metrics: {results_dict_two.metrics}\n\n")

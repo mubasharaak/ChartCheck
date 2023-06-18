@@ -41,10 +41,10 @@ Given a claim, a table and it's caption, decide if the claim is true or false.
 
 Examples: 
 Classify and explain if claim 'Coal is the second-lowest source of energy for electricity production in Romania.' is true or false given this caption: 'Electricity production in Romania by source of energy.' and this table: 'TITLE | \n Other | 2 \n Hydro | 36% \n Coal | 33% \n Nuclear | 19% \n Gas | 10%'.
-Answer: The claim is false. The chart shows that Coal contributes to 33% of the electricity production in Romania, which is the second-highest percentage among all the sources of energy listed in the chart.
+Answer: false. The chart shows that Coal contributes to 33% of the electricity production in Romania, which is the second-highest percentage among all the sources of energy listed in the chart.
 
 Classify and explain if claim 'Hydro is the primary source of energy for electricity production in Romania.' is true or false given this caption: 'Electricity production in Romania by source of energy.' and this table: 'TITLE | \n Other | 2 \n Hydro | 36% \n Coal | 33% \n Nuclear | 19% \n Gas | 10%'.
-Answer: The claim is true. The chart shows that Hydro contributes to 36% of the electricity production in Romania, which is the highest percentage among all the sources of energy listed in the chart. 
+Answer: true. The chart shows that Hydro contributes to 36% of the electricity production in Romania, which is the highest percentage among all the sources of energy listed in the chart. 
 
 Complete the following:
 
@@ -201,8 +201,29 @@ def preprocess_function_classification_explanation(examples, training_setting = 
     # inputs = [prefix + doc for doc in examples["document"]]
     model_inputs = tokenizer(inputs, max_length=max_input_length, padding="max_length", truncation=True)
 
-    # Input instructioon: "The claim is {label}. {explanation}"
-    labels = tokenizer(text_target=[f"The claim is {label_dict_reverse[doc['label']]}. "+doc["explanation"] for doc in examples], max_length=max_target_length, padding="max_length", truncation=True)
+    # Input instructioon: "{label}. {explanation}"
+    labels = tokenizer(text_target=[f"{label_dict_reverse[doc['label']]}. "+doc["explanation"] for doc in examples], max_length=max_target_length, padding="max_length", truncation=True)
+    labels["input_ids"] = [
+        [(l if l != tokenizer.pad_token_id else -100) for l in label] for label in labels["input_ids"]
+    ]
+    model_inputs["labels"] = labels["input_ids"]
+
+    return model_inputs
+
+
+def preprocess_function_classification(examples, training_setting="finetune"):
+    if training_setting == "finetune":
+        inputs = [f"Classify if claim '{doc['claim']}' is true or false given this caption: {doc['caption']} and this table: {read_table(doc['chart_img'])}.\n Answer:" for doc in examples]
+    elif training_setting == "fewshot":
+        inputs = [f"{init_prompt_few_shot} Classify if claim '{doc['claim']}' is true or false given this caption: {doc['caption']} and this table: {read_table(doc['chart_img'])}.\n Answer:" for doc in examples]
+    elif training_setting == "zeroshot":
+        inputs = [f"{init_prompt_zero_shot} Classify if claim '{doc['claim']}' is true or false given this caption: {doc['caption']} and this table: {read_table(doc['chart_img'])}.\n Answer:" for doc in examples]
+
+    # inputs = [prefix + doc for doc in examples["document"]]
+    model_inputs = tokenizer(inputs, max_length=max_input_length, padding="max_length", truncation=True)
+
+    # Input instructioon: "{label}. {explanation}"
+    labels = tokenizer(text_target=[f"{label_dict_reverse[doc['label']]}. " for doc in examples], max_length=max_target_length, padding="max_length", truncation=True)
     labels["input_ids"] = [
         [(l if l != tokenizer.pad_token_id else -100) for l in label] for label in labels["input_ids"]
     ]
@@ -248,8 +269,9 @@ if __name__ == "__main__":
     FINETUNING = True
     FEWSHOT = False
     ZEROSHOT = False
-    ONLY_EXPLANATION = True
-    CLASSIFICATIONS_BY = "deberta"
+    ONLY_EXPLANATION = False
+    ONLY_CLASSIFICATION = True
+    CLASSIFICATIONS_BY = ""
 
     if FINETUNING:
         hg_model_hub_name = "google/flan-t5-base"
@@ -309,6 +331,11 @@ if __name__ == "__main__":
         val_input = preprocess_function_explanation(val_data)
         test_input = preprocess_function_explanation(test_data, is_testset=True)
         test_two_input = preprocess_function_explanation(test_two_data, is_testset_two=True)
+    elif ONLY_CLASSIFICATION:
+        train_input = preprocess_function_classification(train_data)
+        val_input = preprocess_function_classification(val_data)
+        test_input = preprocess_function_classification(test_data)
+        test_two_input = preprocess_function_classification(test_two_data)
     else:
         if FINETUNING:
             train_input = preprocess_function_classification_explanation(train_data, "finetune")
@@ -347,6 +374,8 @@ if __name__ == "__main__":
     if FINETUNING:
         if CLASSIFICATIONS_BY.lower() == "deberta":
             output_path = f"/scratch/users/k20116188/chart-fact-checking/chart_{task}_FlanT5_finetune_deberta_classification"
+        elif ONLY_CLASSIFICATION:
+            output_path = f"/scratch/users/k20116188/chart-fact-checking/chart_{task}_FlanT5_finetune_only_classification"
         else:
             output_path = f"/scratch/users/k20116188/chart-fact-checking/chart_{task}_FlanT5_finetune"
     elif FEWSHOT:

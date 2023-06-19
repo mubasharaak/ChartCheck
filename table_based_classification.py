@@ -14,11 +14,14 @@ max_length = 1024
 
 DATASET_PATH_TRAIN = "dataset/claim_explanation_verification_pre_tasksets_train_V2.json"
 DATASET_PATH_VAL = "dataset/claim_explanation_verification_pre_tasksets_validation_V2.json"
-# DATASET_PATH_TEST = "dataset/claim_explanation_verification_pre_tasksets_test_V2.json"
-# DATASET_PATH_TEST_TWO = "dataset/claim_explanation_verification_pre_tasksets_test_two_V2.json"
+DATASET_PATH_TEST = "dataset/claim_explanation_verification_pre_tasksets_test_V2.json"
+DATASET_PATH_TEST_TWO = "dataset/claim_explanation_verification_pre_tasksets_test_two_V2.json"
 
-DATASET_PATH_TEST = "dataset/claim_explanation_test_one_ID_reasoning.json" # manually annotated subset
-DATASET_PATH_TEST_TWO = "dataset/claim_explanation_test_two_ID_reasoning.json" # manually annotated subset
+# DATASET_PATH_TEST = "dataset/claim_explanation_test_one_ID_reasoning.json" # manually annotated reasoning subset
+# DATASET_PATH_TEST_TWO = "dataset/claim_explanation_test_two_ID_reasoning.json" # manually annotated reasoning subset
+
+# DATASET_PATH_TEST = "dataset/chart_anno_test_one.json" # manually annotated chart annotation subset
+# DATASET_PATH_TEST_TWO = "dataset/chart_anno_test_two.json" # manually annotated chart annotation subset
 
 label_dict = {
     "Yes": 0,
@@ -207,7 +210,8 @@ if __name__ == "__main__":
                               padding=True)
     dev_dataset = ChartDataset(dev_tokenized, val_labels)
 
-    output_dir = "./results/chart_table_classification_DeBERTa_REASONING_SUBSET"
+    # output_dir = "./results/chart_table_classification_DeBERTa"
+    output_dir = "" # todo set output directory before running
     # Check if the directory exists, otherwise create
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)

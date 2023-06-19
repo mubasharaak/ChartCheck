@@ -14,8 +14,11 @@ max_length = 1024
 
 DATASET_PATH_TRAIN = "dataset/claim_explanation_verification_pre_tasksets_train_V2.json"
 DATASET_PATH_VAL = "dataset/claim_explanation_verification_pre_tasksets_validation_V2.json"
-DATASET_PATH_TEST = "dataset/claim_explanation_verification_pre_tasksets_test_V2.json"
-DATASET_PATH_TEST_TWO = "dataset/claim_explanation_verification_pre_tasksets_test_two_V2.json"
+# DATASET_PATH_TEST = "dataset/claim_explanation_verification_pre_tasksets_test_V2.json"
+# DATASET_PATH_TEST_TWO = "dataset/claim_explanation_verification_pre_tasksets_test_two_V2.json"
+
+DATASET_PATH_TEST = "dataset/claim_explanation_test_one_ID_reasoning.json" # manually annotated subset
+DATASET_PATH_TEST_TWO = "dataset/claim_explanation_test_two_ID_reasoning.json" # manually annotated subset
 
 label_dict = {
     "Yes": 0,
@@ -204,7 +207,11 @@ if __name__ == "__main__":
                               padding=True)
     dev_dataset = ChartDataset(dev_tokenized, val_labels)
 
-    output_dir = "./results/chart_table_classification_DeBERTa"
+    output_dir = "./results/chart_table_classification_DeBERTa_REASONING_SUBSET"
+    # Check if the directory exists, otherwise create
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
     results_dict = train(model, training_args, train_dataset=train_dataset,
                          dev_dataset=dev_dataset, test_dataset=test_dataset, only_test=True, save_path=output_dir)
 
@@ -219,6 +226,8 @@ if __name__ == "__main__":
 
         for i, logits in enumerate(results_dict.predictions.tolist()):
             predictions = np.argmax(logits, axis=-1)
+            if 'claim_id' in test_data[i].keys():
+                f.write(f"claim_id: {test_data[i]['claim_id']}\n")
             f.write(f"input: {tokenizer.decode(test_dataset[i]['input_ids'])}\n")
             f.write(f"label: {label_dict_reverse[str(results_dict.label_ids.tolist()[i])]}\n")
             f.write(f"prediction: {label_dict_reverse[str(predictions)]}\n\n")
@@ -228,6 +237,8 @@ if __name__ == "__main__":
 
         for i, logits in enumerate(results_dict_two.predictions.tolist()):
             predictions = np.argmax(logits, axis=-1)
+            if 'claim_id' in test_two_data[i].keys():
+                f.write(f"claim_id: {test_two_data[i]['claim_id']}\n")
             f.write(f"input: {tokenizer.decode(test_two_dataset[i]['input_ids'])}\n")
             f.write(f"label: {label_dict_reverse[str(results_dict_two.label_ids.tolist()[i])]}\n")
             f.write(f"prediction: {label_dict_reverse[str(predictions)]}\n\n")

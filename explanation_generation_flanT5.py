@@ -104,11 +104,11 @@ def compute_metrics(eval_preds):
         for i, entry in enumerate(decoded_preds):
             if "true" in entry.lower():
                 class_label_preds.append(label_dict["true"])
-                gold_answer = decoded_labels[i].lower().split("the claim is ")[1].split(".")[0]
+                gold_answer = decoded_labels[i].lower().split(".")[0]
                 class_label_gold.append(label_dict[gold_answer])
             elif "false" in entry.lower():
                 class_label_preds.append(label_dict["false"])
-                gold_answer = decoded_labels[i].lower().split("the claim is ")[1].split(".")[0]
+                gold_answer = decoded_labels[i].lower().split(".")[0]
                 class_label_gold.append(label_dict[gold_answer])
             else:
                 continue
@@ -266,11 +266,11 @@ def train(model, training_args, train_dataset, dev_dataset, test_dataset, save_p
 
 if __name__ == "__main__":
     # Set variables
-    FINETUNING = True
-    FEWSHOT = False
+    FINETUNING = False
+    FEWSHOT = True
     ZEROSHOT = False
     ONLY_EXPLANATION = False
-    ONLY_CLASSIFICATION = True
+    ONLY_CLASSIFICATION = False
     CLASSIFICATIONS_BY = ""
 
     if FINETUNING:

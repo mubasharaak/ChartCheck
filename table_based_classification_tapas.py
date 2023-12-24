@@ -11,12 +11,11 @@ from transformers import TrainingArguments
 from sklearn.metrics import f1_score
 
 # variables
-max_length = 1024
+MAX_LENGTH = 1024
 DATASET_PATH_TRAIN = "dataset/claim_explanation_verification_pre_tasksets_train_V2.json"
 DATASET_PATH_VAL = "dataset/claim_explanation_verification_pre_tasksets_validation_V2.json"
 DATASET_PATH_TEST = "dataset/claim_explanation_verification_pre_tasksets_test_V2.json"
 DATASET_PATH_TEST_TWO = "dataset/claim_explanation_verification_pre_tasksets_test_two_V2.json"
-
 
 LABEL_DICT = {
     "Yes": 0,
@@ -24,14 +23,14 @@ LABEL_DICT = {
     "TRUE": 0,
     "FALSE": 1,
 }
+METRIC = evaluate.load("glue", "mrpc")
 
 
-# functions
 def join_unicode(delim, entries):
     return delim.join(entries)
 
 
-def read_chart_dataset(dataset):
+def _read_chart_dataset(dataset):
     claims = []
     tables = []
     labels = []
@@ -62,7 +61,7 @@ def tokenize_function(example):
     return tokenizer(example["sentence1"], example["sentence2"], truncation=True)
 
 
-def compute_metrics(eval_preds):
+def _compute_metrics(eval_preds):
     logits, labels = eval_preds
     predictions = np.argmax(logits, axis=-1)
     f1_micro = f1_score(y_true=labels, y_pred=predictions, average='micro')
@@ -122,7 +121,6 @@ class TableDataset(torch.utils.data.Dataset):
         return len(self.claims)
 
 
-metric = evaluate.load("glue", "mrpc")
 def train(model, train_dataset, dev_dataset, test_dataset, save_path, only_test=False):
     # Train model
     trainer = model_trainer(
@@ -148,7 +146,7 @@ def continue_training(model, training_args, train_dataset, dev_dataset, test_dat
         args=training_args,                  # training arguments, defined above
         train_dataset=train_dataset,         # training dataset
         eval_dataset=dev_dataset,             # evaluation dataset
-        compute_metrics=compute_metrics,
+        compute_metrics=_compute_metrics,
     )
 
     trainer.train(resume_from_checkpoint=True)
@@ -180,10 +178,21 @@ def model_trainer(model, train_dataset, dev_dataset, training_epochs, batch_size
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=dev_dataset,  # evaluation dataset
-        compute_metrics=compute_metrics
+        compute_metrics=_compute_metrics
     )
 
     return trainer
+
+
+def _load_dataset(path: str):
+    with open(path, "r", encoding="utf-8") as file:
+        return json.load(file)
+
+
+def _create_dataset(path: str, tok):
+    input_data = _load_dataset(path)
+    claims, tables, labels = _read_chart_dataset(input_data)
+    return TableDataset(claims, tables, labels, tok)
 
 
 if __name__ == "__main__":
@@ -196,29 +205,10 @@ if __name__ == "__main__":
     model.to(device)
     model.train()
 
-    # load files (train, validation, first and second test set)
-    with open(DATASET_PATH_TRAIN, "r", encoding="utf-8") as file:
-        train_data = json.load(file)
-
-    with open(DATASET_PATH_VAL, "r", encoding="utf-8") as file:
-        val_data = json.load(file)
-
-    with open(DATASET_PATH_TEST, "r", encoding="utf-8") as file:
-        test_data = json.load(file)
-
-    with open(DATASET_PATH_TEST_TWO, "r", encoding="utf-8") as file:
-        test_two_data = json.load(file)
-
-    # Dataset preperation
-    train_claims, train_tables, train_labels = read_chart_dataset(train_data)
-    test_claims, test_tables, test_labels = read_chart_dataset(test_data)
-    test_two_claims, test_two_tables, test_two_labels = read_chart_dataset(test_two_data)
-    val_claims, val_tables, val_labels = read_chart_dataset(val_data)
-
-    train_dataset = TableDataset(train_claims, train_tables, train_labels, tokenizer)
-    test_dataset = TableDataset(test_claims, test_tables, test_labels, tokenizer)
-    test_two_dataset = TableDataset(test_two_claims, test_two_tables, test_two_labels, tokenizer)
-    eval_dataset = TableDataset(val_claims, val_tables, val_labels, tokenizer)
+    train_dataset = _create_dataset(DATASET_PATH_TRAIN, tokenizer)
+    test_dataset = _create_dataset(DATASET_PATH_TEST, tokenizer)
+    test_two_dataset = _create_dataset(DATASET_PATH_TEST_TWO, tokenizer)
+    eval_dataset = _create_dataset(DATASET_PATH_VAL, tokenizer)
 
     output_dir = "./results/chart_table_classification_TAPAS"
     results_dict = train(model, train_dataset=train_dataset,

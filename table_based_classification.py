@@ -1,3 +1,4 @@
+import argparse
 import json
 import os
 
@@ -11,27 +12,46 @@ from transformers import TrainingArguments
 # variables
 MAX_LENGTH = 1024
 
-DATASET_PATH_TRAIN = "dataset/claim_explanation_verification_pre_tasksets_train_V2.json"
-DATASET_PATH_VAL = "dataset/claim_explanation_verification_pre_tasksets_validation_V2.json"
-# DATASET_PATH_TEST = "dataset/claim_explanation_verification_pre_tasksets_test_V2.json"
-# DATASET_PATH_TEST_TWO = "dataset/claim_explanation_verification_pre_tasksets_test_two_V2.json"
+parser = argparse.ArgumentParser()
+
+parser.add_argument("--train-path",
+                    help="path to ChartCheck training set in .json format.",
+                    default="dataset/claim_explanation_verification_pre_tasksets_train_V2.json")
+parser.add_argument("--val-path",
+                    help="path to ChartCheck validation set in .json format.",
+                    default="dataset/claim_explanation_verification_pre_tasksets_validation_V2.json")
+parser.add_argument("--test-path",
+                    help="path to ChartCheck test set in .json format.",
+                    default="dataset/claim_explanation_verification_pre_tasksets_test_V2.json")
+parser.add_argument("--test-two-path",
+                    help="path to ChartCheck test set TWO in .json format.",
+                    default="dataset/claim_explanation_verification_pre_tasksets_test_two_V2.json")
+parser.add_argument("--output-name",
+                    help="Name for output files e.g. for results and saving model.",
+                    default="chart_table_classification_DeBERTa")
+parser.add_argument("--hg-model-path",
+                    help="Name for model in Huggingface model hub.",
+                    default="MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli")
+args = parser.parse_args()
 
 # manually annotated reasoning subset
 # DATASET_PATH_TEST = "dataset/claim_explanation_test_one_ID_reasoning.json"
 # DATASET_PATH_TEST_TWO = "dataset/claim_explanation_test_two_ID_reasoning.json"
 
 # manually annotated chart annotation subset
-DATASET_PATH_TEST = "dataset/test_one_annotated_charts.json"
-DATASET_PATH_TEST_TWO = "dataset/test_two_annotated_charts.json"
+# DATASET_PATH_TEST = "dataset/test_one_annotated_charts.json"
+# DATASET_PATH_TEST_TWO = "dataset/test_two_annotated_charts.json"
 
 PATH_DEPLOT_TABLES = "/scratch/users/k20116188/chart-fact-checking/deplot-tables"
 
-# OUTPUT_DIR = "./results/chart_table_classification_DeBERTa"
-OUTPUT_DIR = "./results/chart_table_classification_DeBERTa_CHARTATTRIBUTE_SUBSET"  # todo set output directory before running
+HG_MODEL_NAME = args.hg_model_path
 
-SAVE_MODEL_PATH = "./results/chart_table_classification"
-HG_MODEL_NAME = "MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli"
-# HG_MODEL_NAME = "./results/chart_table_classification_DeBERTa"
+OUTPUT_DIR = os.path.join(".results", args.output_name)
+SAVE_MODEL_PATH = os.path.join(".results", "{}_model".format(args.output_name))
+DATASET_PATH_TRAIN = args.train_path
+DATASET_PATH_VAL = args.val_path
+DATASET_PATH_TEST = args.test_path
+DATASET_PATH_TEST_TWO = args.test_two_path
 
 
 LABEL_DICT = {

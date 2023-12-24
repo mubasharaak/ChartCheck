@@ -3,25 +3,36 @@ import os
 import re
 
 import evaluate
-import nltk
 import numpy as np
-
 import torch
-from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trainer, DataCollatorForSeq2Seq
-from transformers import AutoModelForSeq2SeqLM, DataCollatorForSeq2Seq, Seq2SeqTrainingArguments, Seq2SeqTrainer
 from nltk.tokenize import sent_tokenize
 # nltk.download("punkt")
 from sklearn.metrics import f1_score
-
+from transformers import AutoModelForSeq2SeqLM, DataCollatorForSeq2Seq, Seq2SeqTrainingArguments, Seq2SeqTrainer
+from transformers import AutoTokenizer
 
 # variables
-max_length = 2048
+MAX_LENGTH = 2048
+MAX_INPUT_LEN = 1024
+MAX_TARGET_LEN = 128
 DATASET_PATH_TRAIN = "dataset/claim_explanation_verification_pre_tasksets_train_V2.json"
 DATASET_PATH_VAL = "dataset/claim_explanation_verification_pre_tasksets_validation_V2.json"
 DATASET_PATH_TEST = "dataset/claim_explanation_verification_pre_tasksets_test_V2.json"
 DATASET_PATH_TEST_TWO = "dataset/claim_explanation_verification_pre_tasksets_test_two_V2.json"
 
-label_dict = {
+FINETUNING = False
+FEWSHOT = True
+ZEROSHOT = False
+ONLY_EXPLANATION = False
+ONLY_CLASSIFICATION = False
+CLASSIFICATIONS_BY = ""
+
+if FINETUNING:
+    HG_MODEL_HUB_NAME = "google/flan-t5-base"
+else:
+    HG_MODEL_HUB_NAME = "google/flan-t5-xl"
+
+LABEL_DICT = {
     "Yes": 0,
     "No": 1,
     "TRUE": 0,
@@ -29,14 +40,14 @@ label_dict = {
     "true": 0,
     "false": 1,
 }
-label_dict_reverse = {
+LABEL_DICT_REVERSE = {
     "Yes": "true",
     "No": "false",
     "TRUE": "true",
     "FALSE": "false",
 }
 
-init_prompt_few_shot = """
+INIT_PROMPT_FEW_SHOT = """
 Given a claim, a table and it's caption, decide if the claim is true or false. 
 
 Examples: 
@@ -50,7 +61,7 @@ Complete the following:
 
 """
 
-init_prompt_zero_shot = """
+INIT_PROMPT_ZERO_SHOT = """
 Given a claim, a table and it's caption, decide if the claim is true or false. 
 
 Complete the following:
@@ -63,11 +74,7 @@ def join_unicode(delim, entries):
     return delim.join(entries)
 
 
-max_input_length = 1024
-max_target_length = 128
-
-
-def read_table(chart_filename: str):
+def _read_table(chart_filename: str):
     path_table = os.path.join("/scratch/users/k20116188/chart-fact-checking/deplot-tables",
                               os.path.basename(chart_filename) + ".txt")
     with open(path_table, "r", encoding="utf-8") as f:
@@ -75,7 +82,7 @@ def read_table(chart_filename: str):
     return table
 
 
-def postprocess_text(preds, labels):
+def _postprocess_text(preds, labels):
     preds = [pred.strip() for pred in preds]
     labels = [label.strip() for label in labels]
 
@@ -97,19 +104,19 @@ def compute_metrics(eval_preds):
     decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
 
     # Some simple post-processing
-    decoded_preds, decoded_labels = postprocess_text(decoded_preds, decoded_labels)
+    decoded_preds, decoded_labels = _postprocess_text(decoded_preds, decoded_labels)
     if not ONLY_EXPLANATION:
         class_label_preds = []
         class_label_gold = []
         for i, entry in enumerate(decoded_preds):
             if "true" in entry.lower():
-                class_label_preds.append(label_dict["true"])
+                class_label_preds.append(LABEL_DICT["true"])
                 gold_answer = decoded_labels[i].lower().split(".")[0]
-                class_label_gold.append(label_dict[gold_answer])
+                class_label_gold.append(LABEL_DICT[gold_answer])
             elif "false" in entry.lower():
-                class_label_preds.append(label_dict["false"])
+                class_label_preds.append(LABEL_DICT["false"])
                 gold_answer = decoded_labels[i].lower().split(".")[0]
-                class_label_gold.append(label_dict[gold_answer])
+                class_label_gold.append(LABEL_DICT[gold_answer])
             else:
                 continue
 
@@ -131,7 +138,7 @@ def compute_metrics(eval_preds):
     # bertscore
     metric = evaluate.load("bertscore")
     result_bertscore = metric.compute(predictions=decoded_preds, references=decoded_labels, lang="en")
-    result_bertscore = {k: sum(v)/len(v) for k, v in result_bertscore.items() if k in ['precision', 'recall', 'f1']}
+    result_bertscore = {k: sum(v) / len(v) for k, v in result_bertscore.items() if k in ['precision', 'recall', 'f1']}
     result_bertscore["bertscore_precision"] = result_bertscore.pop("precision")
     result_bertscore["bertscore_recall"] = result_bertscore.pop("recall")
     result_bertscore["bertscore_f1"] = result_bertscore.pop("f1")
@@ -145,7 +152,7 @@ def compute_metrics(eval_preds):
     # bleurt
     metric = evaluate.load('bleurt')
     result_bleurt = metric.compute(predictions=decoded_preds, references=decoded_labels)
-    result_bleurt = {k: sum(v)/len(v) for k, v in result_bleurt.items()}
+    result_bleurt = {k: sum(v) / len(v) for k, v in result_bleurt.items()}
     result_bleurt["bleurt"] = result_bleurt.pop("scores")
     result.update(result_bleurt)
 
@@ -168,20 +175,23 @@ def preprocess_function_explanation(examples, is_testset=False, is_testset_two=F
         if is_testset:
             inputs = [
 
-                f"Explain why '{doc['claim']}' is {dict_test_pred[preprocess_claim_for_pred_label(doc['claim'])]} given this caption: {doc['caption']} and table: {read_table(doc['chart_img'])}."
+                f"Explain why '{doc['claim']}' is {dict_test_pred[preprocess_claim_for_pred_label(doc['claim'])]} given this caption: {doc['caption']} and table: {_read_table(doc['chart_img'])}."
                 for doc in examples]
 
-        else: # is_testset_two
+        else:  # is_testset_two
             inputs = [
-                f"Explain why '{doc['claim']}' is {dict_test_two_pred[preprocess_claim_for_pred_label(doc['claim'])]} given this caption: {doc['caption']} and table: {read_table(doc['chart_img'])}."
+                f"Explain why '{doc['claim']}' is {dict_test_two_pred[preprocess_claim_for_pred_label(doc['claim'])]} given this caption: {doc['caption']} and table: {_read_table(doc['chart_img'])}."
                 for doc in examples]
-    else: # training or val set
-        inputs = [f"Explain why '{doc['claim']}' is {label_dict_reverse[doc['label']]} given this caption: {doc['caption']} and table: {read_table(doc['chart_img'])}." for doc in examples]
+    else:  # training or val set
+        inputs = [
+            f"Explain why '{doc['claim']}' is {LABEL_DICT_REVERSE[doc['label']]} given this caption: {doc['caption']} and table: {_read_table(doc['chart_img'])}."
+            for doc in examples]
 
     # inputs = [prefix + doc for doc in examples["document"]]
-    model_inputs = tokenizer(inputs, max_length=max_input_length, padding="max_length", truncation=True)
+    model_inputs = tokenizer(inputs, max_length=MAX_INPUT_LEN, padding="max_length", truncation=True)
 
-    labels = tokenizer(text_target=[doc["explanation"] for doc in examples], max_length=max_target_length, padding="max_length", truncation=True)
+    labels = tokenizer(text_target=[doc["explanation"] for doc in examples], max_length=MAX_TARGET_LEN,
+                       padding="max_length", truncation=True)
     labels["input_ids"] = [
         [(l if l != tokenizer.pad_token_id else -100) for l in label] for label in labels["input_ids"]
     ]
@@ -190,19 +200,26 @@ def preprocess_function_explanation(examples, is_testset=False, is_testset_two=F
     return model_inputs
 
 
-def preprocess_function_classification_explanation(examples, training_setting = "finetune"):
+def preprocess_function_classification_explanation(examples, training_setting="finetune"):
     if training_setting == "finetune":
-        inputs = [f"Classify and explain if claim '{doc['claim']}' is true or false given this caption: {doc['caption']} and this table: {read_table(doc['chart_img'])}.\n Answer:" for doc in examples]
+        inputs = [
+            f"Classify and explain if claim '{doc['claim']}' is true or false given this caption: {doc['caption']} and this table: {_read_table(doc['chart_img'])}.\n Answer:"
+            for doc in examples]
     elif training_setting == "fewshot":
-        inputs = [f"{init_prompt_few_shot} Classify and explain if claim '{doc['claim']}' is true or false given this caption: {doc['caption']} and this table: {read_table(doc['chart_img'])}.\n Answer:" for doc in examples]
+        inputs = [
+            f"{INIT_PROMPT_FEW_SHOT} Classify and explain if claim '{doc['claim']}' is true or false given this caption: {doc['caption']} and this table: {_read_table(doc['chart_img'])}.\n Answer:"
+            for doc in examples]
     elif training_setting == "zeroshot":
-        inputs = [f"{init_prompt_zero_shot} Classify and explain if claim '{doc['claim']}' is true or false given this caption: {doc['caption']} and this table: {read_table(doc['chart_img'])}.\n Answer:" for doc in examples]
+        inputs = [
+            f"{INIT_PROMPT_ZERO_SHOT} Classify and explain if claim '{doc['claim']}' is true or false given this caption: {doc['caption']} and this table: {_read_table(doc['chart_img'])}.\n Answer:"
+            for doc in examples]
 
     # inputs = [prefix + doc for doc in examples["document"]]
-    model_inputs = tokenizer(inputs, max_length=max_input_length, padding="max_length", truncation=True)
+    model_inputs = tokenizer(inputs, max_length=MAX_INPUT_LEN, padding="max_length", truncation=True)
 
     # Input instructioon: "{label}. {explanation}"
-    labels = tokenizer(text_target=[f"{label_dict_reverse[doc['label']]}. "+doc["explanation"] for doc in examples], max_length=max_target_length, padding="max_length", truncation=True)
+    labels = tokenizer(text_target=[f"{LABEL_DICT_REVERSE[doc['label']]}. " + doc["explanation"] for doc in examples],
+                       max_length=MAX_TARGET_LEN, padding="max_length", truncation=True)
     labels["input_ids"] = [
         [(l if l != tokenizer.pad_token_id else -100) for l in label] for label in labels["input_ids"]
     ]
@@ -213,17 +230,24 @@ def preprocess_function_classification_explanation(examples, training_setting = 
 
 def preprocess_function_classification(examples, training_setting="finetune"):
     if training_setting == "finetune":
-        inputs = [f"Classify if claim '{doc['claim']}' is true or false given this caption: {doc['caption']} and this table: {read_table(doc['chart_img'])}.\n Answer:" for doc in examples]
+        inputs = [
+            f"Classify if claim '{doc['claim']}' is true or false given this caption: {doc['caption']} and this table: {_read_table(doc['chart_img'])}.\n Answer:"
+            for doc in examples]
     elif training_setting == "fewshot":
-        inputs = [f"{init_prompt_few_shot} Classify if claim '{doc['claim']}' is true or false given this caption: {doc['caption']} and this table: {read_table(doc['chart_img'])}.\n Answer:" for doc in examples]
+        inputs = [
+            f"{INIT_PROMPT_FEW_SHOT} Classify if claim '{doc['claim']}' is true or false given this caption: {doc['caption']} and this table: {_read_table(doc['chart_img'])}.\n Answer:"
+            for doc in examples]
     elif training_setting == "zeroshot":
-        inputs = [f"{init_prompt_zero_shot} Classify if claim '{doc['claim']}' is true or false given this caption: {doc['caption']} and this table: {read_table(doc['chart_img'])}.\n Answer:" for doc in examples]
+        inputs = [
+            f"{INIT_PROMPT_ZERO_SHOT} Classify if claim '{doc['claim']}' is true or false given this caption: {doc['caption']} and this table: {_read_table(doc['chart_img'])}.\n Answer:"
+            for doc in examples]
 
     # inputs = [prefix + doc for doc in examples["document"]]
-    model_inputs = tokenizer(inputs, max_length=max_input_length, padding="max_length", truncation=True)
+    model_inputs = tokenizer(inputs, max_length=MAX_INPUT_LEN, padding="max_length", truncation=True)
 
     # Input instructioon: "{label}. {explanation}"
-    labels = tokenizer(text_target=[f"{label_dict_reverse[doc['label']]}. " for doc in examples], max_length=max_target_length, padding="max_length", truncation=True)
+    labels = tokenizer(text_target=[f"{LABEL_DICT_REVERSE[doc['label']]}. " for doc in examples],
+                       max_length=MAX_TARGET_LEN, padding="max_length", truncation=True)
     labels["input_ids"] = [
         [(l if l != tokenizer.pad_token_id else -100) for l in label] for label in labels["input_ids"]
     ]
@@ -264,42 +288,30 @@ def train(model, training_args, train_dataset, dev_dataset, test_dataset, save_p
     return result_dict
 
 
-if __name__ == "__main__":
-    # Set variables
-    FINETUNING = False
-    FEWSHOT = True
-    ZEROSHOT = False
-    ONLY_EXPLANATION = False
-    ONLY_CLASSIFICATION = False
-    CLASSIFICATIONS_BY = ""
+def _load_dataset(path: str):
+    with open(path, "r", encoding="utf-8") as file:
+        return json.load(file)
 
-    if FINETUNING:
-        hg_model_hub_name = "google/flan-t5-base"
-    else:
-        hg_model_hub_name = "google/flan-t5-xl"
+
+if __name__ == "__main__":
     # Load model
-    tokenizer = AutoTokenizer.from_pretrained(hg_model_hub_name)
-    model = AutoModelForSeq2SeqLM.from_pretrained(hg_model_hub_name)
+    tokenizer = AutoTokenizer.from_pretrained(HG_MODEL_HUB_NAME)
+    model = AutoModelForSeq2SeqLM.from_pretrained(HG_MODEL_HUB_NAME)
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     model.to(device)
     model.train()
 
     # load files (train, validation, first and second test set)
-    with open(DATASET_PATH_TRAIN, "r", encoding="utf-8") as file:
-        train_data = json.load(file)
-
-    with open(DATASET_PATH_VAL, "r", encoding="utf-8") as file:
-        val_data = json.load(file)
-
-    with open(DATASET_PATH_TEST, "r", encoding="utf-8") as file:
-        test_data = json.load(file)
-
-    with open(DATASET_PATH_TEST_TWO, "r", encoding="utf-8") as file:
-        test_two_data = json.load(file)
+    train_data = _load_dataset(DATASET_PATH_TRAIN)
+    val_data = _load_dataset(DATASET_PATH_VAL)
+    test_data = _load_dataset(DATASET_PATH_TEST)
+    test_two_data = _load_dataset(DATASET_PATH_TEST_TWO)
 
     # load and replace labels for DeBERTa/TAPAS classification for testsets
     if CLASSIFICATIONS_BY.lower() == "deberta":
-        with open("/users/k20116188/projects/chartcheck/ChartFC/results/chart_table_classification_DeBERTa/output_test.txt", "r", encoding="utf-8") as file:
+        with open(
+                "/users/k20116188/projects/chartcheck/ChartFC/results/chart_table_classification_DeBERTa/output_test.txt",
+                "r", encoding="utf-8") as file:
             test_predictions = file.readlines()
         dict_test_pred = {}
         for i, entry in enumerate(test_predictions):
@@ -312,7 +324,9 @@ if __name__ == "__main__":
                     pred_label = "True"
                 dict_test_pred[str(claim)] = pred_label
 
-        with open("/users/k20116188/projects/chartcheck/ChartFC/results/chart_table_classification_DeBERTa/output_test_two.txt", "r", encoding="utf-8") as file:
+        with open(
+                "/users/k20116188/projects/chartcheck/ChartFC/results/chart_table_classification_DeBERTa/output_test_two.txt",
+                "r", encoding="utf-8") as file:
             test_two_predictions = file.readlines()
         dict_test_two_pred = {}
         for i, entry in enumerate(test_two_predictions):
@@ -413,12 +427,14 @@ if __name__ == "__main__":
         results_dict = train(model, training_args, train_dataset=train_dataset,
                              dev_dataset=val_dataset, test_dataset=test_dataset, save_path=output_path, only_test=False)
         results_dict_two = train(model, training_args, train_dataset=train_dataset,
-                             dev_dataset=val_dataset, test_dataset=test_two_dataset, save_path=output_path, only_test=True)
+                                 dev_dataset=val_dataset, test_dataset=test_two_dataset, save_path=output_path,
+                                 only_test=True)
     else:
         results_dict = train(model, training_args, train_dataset=train_dataset,
                              dev_dataset=val_dataset, test_dataset=test_dataset, save_path=output_path, only_test=True)
         results_dict_two = train(model, training_args, train_dataset=train_dataset,
-                             dev_dataset=val_dataset, test_dataset=test_two_dataset, save_path=output_path, only_test=True)
+                                 dev_dataset=val_dataset, test_dataset=test_two_dataset, save_path=output_path,
+                                 only_test=True)
 
     with open(path_test_output, "w") as f:
         f.write(f"result_dict.metrics: {results_dict.metrics}\n\n")

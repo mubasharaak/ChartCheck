@@ -34,7 +34,6 @@ parser.add_argument("--hg-model-path",
                     default="./results/chart_table_classification_DeBERTa")
 parser.add_argument("--only-test",
                     help="If set to true, model is not trained but only used for testing.",
-                    default="./results/chart_table_classification_DeBERTa",
                     action="store_false")
 args = parser.parse_args()
 
@@ -49,15 +48,18 @@ args = parser.parse_args()
 PATH_DEPLOT_TABLES = "/scratch/users/k20116188/chart-fact-checking/deplot-tables"
 
 HG_MODEL_NAME = args.hg_model_path
+HG_MODEL_NAME_TOKENIZER = "MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli"
 
-OUTPUT_DIR = os.path.join(".results", args.output_name)
-SAVE_MODEL_PATH = os.path.join(".results", "{}_model".format(args.output_name))
+OUTPUT_DIR = os.path.join("results", args.output_name)
+SAVE_MODEL_PATH = os.path.join("results", "{}_model".format(args.output_name))
 DATASET_PATH_TRAIN = args.train_path
 DATASET_PATH_VAL = args.val_path
 DATASET_PATH_TEST = args.test_path
 DATASET_PATH_TEST_TWO = args.test_two_path
 
-ONLY_TEST = args.only_test
+print("Path for output: {}".format(OUTPUT_DIR))
+
+ONLY_TEST = True
 
 LABEL_DICT = {
     "yes": 0,
@@ -204,7 +206,7 @@ def _create_dataset(input_data):
 
 if __name__ == "__main__":
     # Load model
-    tokenizer = AutoTokenizer.from_pretrained(HG_MODEL_NAME)
+    tokenizer = AutoTokenizer.from_pretrained(HG_MODEL_NAME_TOKENIZER)
     model = AutoModelForSequenceClassification.from_pretrained(HG_MODEL_NAME,
                                                                torch_dtype="auto")
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')

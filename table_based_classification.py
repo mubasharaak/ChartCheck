@@ -31,7 +31,11 @@ parser.add_argument("--output-name",
                     default="chart_table_classification_DeBERTa")
 parser.add_argument("--hg-model-path",
                     help="Name for model in Huggingface model hub.",
-                    default="MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli")
+                    default="./results/chart_table_classification_DeBERTa")
+parser.add_argument("--only-test",
+                    help="If set to true, model is not trained but only used for testing.",
+                    default="./results/chart_table_classification_DeBERTa",
+                    action="store_false")
 args = parser.parse_args()
 
 # manually annotated reasoning subset
@@ -53,12 +57,13 @@ DATASET_PATH_VAL = args.val_path
 DATASET_PATH_TEST = args.test_path
 DATASET_PATH_TEST_TWO = args.test_two_path
 
+ONLY_TEST = args.only_test
 
 LABEL_DICT = {
-    "Yes": 0,
-    "No": 1,
-    "TRUE": 0,
-    "FALSE": 1,
+    "yes": 0,
+    "no": 1,
+    "true": 0,
+    "false": 1,
 }
 
 LABEL_DICT_REVERSE = {
@@ -117,7 +122,7 @@ def _read_chart_dataset(dataset):
 
         claims.append(claim)
         evidences.append(table + ". " + caption)
-        labels.append(LABEL_DICT[label])
+        labels.append(LABEL_DICT[label.lower()])
 
     return claims, evidences, labels
 
@@ -200,7 +205,7 @@ def _create_dataset(input_data):
 if __name__ == "__main__":
     # Load model
     tokenizer = AutoTokenizer.from_pretrained(HG_MODEL_NAME)
-    model = AutoModelForSequenceClassification.from_pretrained("./results/chart_table_classification_DeBERTa",
+    model = AutoModelForSequenceClassification.from_pretrained(HG_MODEL_NAME,
                                                                torch_dtype="auto")
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     model.to(device)
@@ -222,12 +227,12 @@ if __name__ == "__main__":
         os.makedirs(OUTPUT_DIR)
 
     results_dict = train(model, TRAINING_ARGS, train_dataset=train_dataset,
-                         dev_dataset=val_dataset, test_dataset=test_dataset, only_test=True, save_path=OUTPUT_DIR)
+                         dev_dataset=val_dataset, test_dataset=test_dataset, only_test=ONLY_TEST, save_path=OUTPUT_DIR)
 
     print(f"len(results_dict.predictions.tolist()): {len(results_dict.predictions.tolist())}")
 
     results_dict_two = train(model, TRAINING_ARGS, train_dataset=train_dataset,
-                             dev_dataset=val_dataset, test_dataset=test_two_dataset, only_test=True,
+                             dev_dataset=val_dataset, test_dataset=test_two_dataset, only_test=ONLY_TEST,
                              save_path=OUTPUT_DIR)
     print(f"len(results_dict_two.predictions.tolist()): {len(results_dict_two.predictions.tolist())}")
 

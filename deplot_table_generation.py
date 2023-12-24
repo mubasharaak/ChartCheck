@@ -1,5 +1,5 @@
 import numpy as np
-from transformers import AutoProcessor, Pix2StructForConditionalGeneration, Pix2StructProcessor, Pix2StructImageProcessor
+from transformers import AutoProcessor, Pix2StructForConditionalGeneration
 import json
 from PIL import Image
 import os
@@ -7,6 +7,9 @@ import torch
 import cv2
 import requests
 from io import BytesIO
+
+TASKSET_PATH = "claim_explanation_generation_pre_tasksets.json"
+DIR_DEPLOT_GEN_TABLES = "/scratch/users/k20116188/chart-fact-checking/deplot-tables"
 
 
 def sharpen_image(img):
@@ -29,13 +32,14 @@ def sharpen_image(img):
     return sharpened_pil_img
 
 
+# Load DePlot model
 model = Pix2StructForConditionalGeneration.from_pretrained("google/deplot")
 processor = AutoProcessor.from_pretrained("google/deplot")
 device = "cuda" if torch.cuda.is_available() else "cpu"
 processor.image_processor.is_vqa = False
 model.to(device)
 
-with open("claim_explanation_generation_pre_tasksets.json", "r") as f:
+with open(TASKSET_PATH, "r") as f:
     data = json.load(f)
 
 print(f"Length of loaded dataset is: {len(data)} entries.")
@@ -62,8 +66,8 @@ num_val = int(0.1 * len(data))
 
 # Split the indices into training, validation, and testing sets
 train_indices = indices[:num_train]
-val_indices = indices[num_train:num_train+num_val]
-test_indices = indices[num_train+num_val:]
+val_indices = indices[num_train:num_train + num_val]
+test_indices = indices[num_train + num_val:]
 
 train_data = data[train_indices]
 val_data = data[val_indices]
@@ -109,15 +113,16 @@ for item in train_data:
     else:
         item["chart_type"] = "mixed"
 
-category = {"bar_horizontal":[], "bar_vertical":[],"line_chart":[],"pie_chart":[],"mixed":[]}
+category = {"bar_horizontal": [], "bar_vertical": [], "line_chart": [], "pie_chart": [], "mixed": []}
 
 for item in train_data:
     category[item["chart_type"]].append(item)
 
 print(f"len(data): {len(data)}")
 
-for item in data[1190:]:
-    path_table = os.path.join("/scratch/users/k20116188/chart-fact-checking/deplot-tables", os.path.basename(item["chart_img"])+".txt")
+for item in data:
+    path_table = os.path.join(DIR_DEPLOT_GEN_TABLES,
+                              os.path.basename(item["chart_img"]) + ".txt")
     if os.path.isfile(path_table):
         print(f"File {path_table} already exists.")
         continue
@@ -127,10 +132,9 @@ for item in data[1190:]:
         response = requests.get(item["chart_img"])
         img = Image.open(BytesIO(response.content)).convert('RGB')
         normal_inputs = processor(images=img, return_tensors="pt")
-        # print(f"normal_inputs: {normal_inputs}")
-
         normal_generated_ids = model.generate(flattened_patches=normal_inputs["flattened_patches"].to(device),
-                                              attention_mask=normal_inputs["attention_mask"].to(device), max_new_tokens=512)
+                                              attention_mask=normal_inputs["attention_mask"].to(device),
+                                              max_new_tokens=512)
         normal_predicted_answer = processor.tokenizer.batch_decode(normal_generated_ids,
                                                                    skip_special_tokens=True)[0].replace("<0x0A>", "\n")
         # print(normal_predicted_answer)
@@ -138,5 +142,6 @@ for item in data[1190:]:
         print(f"Error for file {item['chart_img']}: {e}")
         continue
 
+    # save deplot table
     with open(path_table, "w", encoding="utf-8") as f:
         f.write(normal_predicted_answer)

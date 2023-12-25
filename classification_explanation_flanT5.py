@@ -58,7 +58,6 @@ Classify and explain if claim 'Hydro is the primary source of energy for electri
 Answer: true. The chart shows that Hydro contributes to 36% of the electricity production in Romania, which is the highest percentage among all the sources of energy listed in the chart. 
 
 Complete the following:
-
 """
 
 INIT_PROMPT_ZERO_SHOT = """

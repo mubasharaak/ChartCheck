@@ -7,7 +7,7 @@ from nltk.tokenize import sent_tokenize
 from sklearn.metrics import f1_score
 
 _SEED = 10
-_MODEL = "gpt-3.5-turbo-1106"
+_MODEL = "gpt-4-vision-preview"
 _MAX_TOKENS = 1500
 
 LABEL_DICT = {
@@ -24,6 +24,7 @@ LABEL_DICT_REVERSE = {
     "TRUE": "true",
     "FALSE": "false",
 }
+_KEY = open('openai_key.txt', 'r').read()
 
 
 @dataclass
@@ -61,20 +62,69 @@ Caption: {}
 Table: {}
 Answer:"""
 
+_PROMPT_VISION = """
+You will get a claim, a chart image and its caption. 
+Decide if the claim is 'true' or 'false' based on the provided chart and caption, explain your decision.
+Use no further background knowledge but your commonsense to understand the chart. 
 
-def _query_openai(prompt: str, client, seed=_SEED, model=_MODEL, max_tokens=_MAX_TOKENS):
-    return client.chat.completions.create(
-        messages=[
+-----
+Examples: 
+Claim: Coal is the second-lowest source of energy for electricity production in Romania.
+Caption: Electricity production in Romania by source of energy.
+Answer: false. The chart shows that Coal contributes to 33% of the electricity production in Romania, which is the second-highest percentage among all the sources of energy listed in the chart.
+
+Claim: Hydro is the primary source of energy for electricity production in Romania.
+Caption: Electricity production in Romania by source of energy.
+Answer: true. The chart shows that Hydro contributes to 36% of the electricity production in Romania, which is the highest percentage among all the sources of energy listed in the chart. 
+
+-----
+Complete the following:
+Claim: {}
+Caption: {}
+Answer:"""
+
+
+def _query_openai(dataset_entry, prompt: str, client, seed=_SEED, model=_MODEL, max_tokens=_MAX_TOKENS):
+    if "3.5" in model:
+        return client.chat.completions.create(
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ],
+            model=model,
+            max_tokens=max_tokens,
+            # response_format={"type": response_format},
+            seed=seed,
+        )
+    else:
+        # GPT4V
+        prompt_messages = [
             {
                 "role": "user",
-                "content": prompt,
+                "content": [
+                    {
+                        "type": "text",
+                        "text": prompt
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": dataset_entry["chart_img"]
+                        }
+                    }
+                ]
             }
-        ],
-        model=model,
-        max_tokens=max_tokens,
-        # response_format={"type": response_format},
-        seed=seed,
-    )
+        ]
+        params = {
+            "model": model,
+            "messages": prompt_messages,
+            # "response_format": {"type": "json_object"},  # Added response format
+            # "headers": {"Openai-Version": "2020-11-07"},
+            "max_tokens": max_tokens,
+        }
+        return client.chat.completions.create(**params)
 
 
 def _get_response_text(response: openai.types.chat.chat_completion.ChatCompletion):
@@ -97,7 +147,11 @@ def _read_table(chart_filename: str):
 
 def _prepare_prompt(dataset_sample):
     """Formats prompt using dataset sample as input."""
-    return _PROMPT.format(dataset_sample["claim"], _read_table(dataset_sample["chart_img"]), dataset_sample["caption"])
+    if "3.5" in _MODEL:
+        return _PROMPT.format(dataset_sample["claim"], _read_table(dataset_sample["chart_img"]),
+                              dataset_sample["caption"])
+    else:
+        return _PROMPT_VISION.format(dataset_sample["claim"], dataset_sample["caption"])
 
 
 def prompt_openai_model(dataset: list, client):
@@ -109,7 +163,7 @@ def prompt_openai_model(dataset: list, client):
         prompt = _prepare_prompt(sample)
         while True:
             try:
-                responses.append(_process_output(sample, _query_openai(prompt, client)))
+                responses.append(_process_output(sample, _query_openai(sample, prompt, client)))
                 break
             except openai.APITimeoutError as e:
                 print(e)
@@ -119,20 +173,6 @@ def prompt_openai_model(dataset: list, client):
         #     print(e)
         #     continue
     return responses
-
-
-def calculate_atomic_score(response: dict):
-    try:
-        if ("refute" in response and response["refute"] > 0) or (
-                "contradicts" in response and response["contradicts"] > 0):
-            # evidence clearly contradicts a sub-fact of the claim
-            return 1
-        elif "supports" in response:
-            return response["supports"] / (response["supports"] + response["not enough information"])
-        else:
-            return response["support"] / (response["support"] + response["not enough information"])
-    except Exception as e:
-        return 0
 
 
 def _postprocess_text(preds, labels):

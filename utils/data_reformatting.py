@@ -2,8 +2,8 @@ import json
 
 import pandas as pd
 
-INPUT_PATH = "/Users/user/Library/CloudStorage/OneDrive-King'sCollegeLondon/PycharmProjects/ChartFC/data/testset_reannotation/claim_explanation_verification_pre_tasksets_test_two_V2.csv"
-OUTPUT_PATH = "/Users/user/Library/CloudStorage/OneDrive-King'sCollegeLondon/PycharmProjects/ChartFC/data/testset_reannotation/claim_explanation_verification_pre_tasksets_test_two_V2.json"
+INPUT_PATH = "/Users/user/Library/CloudStorage/OneDrive-King'sCollegeLondon/PycharmProjects/ChartFC/data/testset_reannotation/claim_explanation_verification_pre_tasksets_test_V2.csv"
+OUTPUT_PATH = "/Users/user/Library/CloudStorage/OneDrive-King'sCollegeLondon/PycharmProjects/ChartFC/data/testset_reannotation/claim_explanation_verification_pre_tasksets_test_V2.json"
 
 if INPUT_PATH.endswith(".json"):
     df = pd.read_json(INPUT_PATH)

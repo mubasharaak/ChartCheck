@@ -4,11 +4,10 @@ import os
 import evaluate
 import numpy as np
 import pandas as pd
-
 import torch
-from transformers import Trainer, TapasForSequenceClassification, TapasTokenizer, TapasConfig
-from transformers import TrainingArguments
 from sklearn.metrics import f1_score
+from transformers import Trainer, TapasForSequenceClassification, TapasTokenizer
+from transformers import TrainingArguments
 
 # variables
 MAX_LENGTH = 1024
@@ -24,6 +23,7 @@ LABEL_DICT = {
     "FALSE": 1,
 }
 METRIC = evaluate.load("glue", "mrpc")
+_ONLY_TEST = True
 
 
 def join_unicode(delim, entries):
@@ -89,13 +89,13 @@ class TableDataset(torch.utils.data.Dataset):
             if table_list:
                 max_len = max(table_list)
                 for i, entry in enumerate(table):
-                    if entry and entry!=None:
+                    if entry and entry != None:
                         while len(entry) < max_len:
                             entry.append("")
                         table[i] = entry
                     else:
                         table[i] = ["" for i in range(max_len)]
-                if len(table)>2:
+                if len(table) > 2:
                     table_df = pd.DataFrame(table[2:], columns=table[1]).astype(str)
                 else:
                     table_df = pd.DataFrame({'': []}).astype(str)
@@ -142,10 +142,10 @@ def train(model, train_dataset, dev_dataset, test_dataset, save_path, only_test=
 
 def continue_training(model, training_args, train_dataset, dev_dataset, test_dataset):
     trainer = Trainer(
-        model=model,                         # the instantiated 🤗 Transformers model to be trained
-        args=training_args,                  # training arguments, defined above
-        train_dataset=train_dataset,         # training dataset
-        eval_dataset=dev_dataset,             # evaluation dataset
+        model=model,  # the instantiated 🤗 Transformers model to be trained
+        args=training_args,  # training arguments, defined above
+        train_dataset=train_dataset,  # training dataset
+        eval_dataset=dev_dataset,  # evaluation dataset
         compute_metrics=_compute_metrics,
     )
 
@@ -199,7 +199,8 @@ if __name__ == "__main__":
     # Load model
     hg_model_hub_name = "google/tapas-base-finetuned-tabfact"
     tokenizer = TapasTokenizer.from_pretrained(hg_model_hub_name)
-    model = TapasForSequenceClassification.from_pretrained("./results/chart_table_classification_TAPAS", torch_dtype="auto")
+    model = TapasForSequenceClassification.from_pretrained("./results/chart_table_classification_TAPAS",
+                                                           torch_dtype="auto")
 
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     model.to(device)
@@ -212,28 +213,27 @@ if __name__ == "__main__":
 
     output_dir = "./results/chart_table_classification_TAPAS"
     results_dict = train(model, train_dataset=train_dataset,
-                         dev_dataset=eval_dataset, test_dataset=test_dataset, only_test=True, save_path=output_dir)
+                         dev_dataset=eval_dataset, test_dataset=test_dataset, only_test=_ONLY_TEST,
+                         save_path=output_dir)
 
     results_dict_two = train(model, train_dataset=train_dataset,
-                         dev_dataset=eval_dataset, test_dataset=test_two_dataset, only_test=True, save_path=output_dir)
+                             dev_dataset=eval_dataset, test_dataset=test_two_dataset, only_test=_ONLY_TEST,
+                             save_path=output_dir)
 
     print(f"Saving output to: {output_dir}.")
 
     with open(os.path.join(output_dir, "test_output.txt"), "w") as f:
-        f.write(f"metrics: {results_dict.metrics}")
+        f.write(f"metrics: {results_dict.metrics}\n\n")
         for i, logits in enumerate(results_dict.predictions.tolist()):
             predictions = np.argmax(logits, axis=-1)
             f.write(f"input: {tokenizer.decode(test_dataset[i]['input_ids'])}\n")
             f.write(f"label: {LABEL_DICT[results_dict.label_ids[i]]}\n")
             f.write(f"prediction: {LABEL_DICT[predictions[i]]}\n\n")
 
-    with open(os.path.join(output_dir, "output_test_two.txt"), "w") as f:
-        f.write(f"metrics: {results_dict_two.metrics}")
+    with open(os.path.join(output_dir, "test_two_output.txt"), "w") as f:
+        f.write(f"metrics: {results_dict_two.metrics}\n\n")
         for i, logits in enumerate(results_dict_two.predictions.tolist()):
             predictions = np.argmax(logits, axis=-1)
             f.write(f"input: {tokenizer.decode(test_dataset[i]['input_ids'])}\n")
             f.write(f"label: {LABEL_DICT[results_dict_two.label_ids[i]]}\n")
             f.write(f"prediction: {LABEL_DICT[predictions[i]]}\n\n")
-
-
-

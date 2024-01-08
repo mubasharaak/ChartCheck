@@ -71,6 +71,14 @@ def _save_jsonl_file(data, file_path):
             f.write("\n")
 
 
+def _load_jsonl_file(file_path):
+    content = []
+    with open(file_path, "r", encoding="utf-8") as f:
+        for entry in f.readlines():
+            content.append(json.loads(entry))
+    return content
+
+
 def main():
     index_mapping = {0: "one", 1: "two"}
     for i, path in enumerate([_TEST_SET_PATH, _TEST_SET_TWO_PATH]):
@@ -79,8 +87,7 @@ def main():
 
         if _ONLY_EVALUATE:
             # Given predictions_output_path load predictions for evaluation
-            # predictions = _load_jsonl_file(os.path.join(_OUTPUT_PATH, "predictions.json"))
-            pass
+            predictions = _load_jsonl_file(os.path.join(_OUTPUT_PATH, ""))
         else:
             # predict using OpenAI API and evaluate
             input_data = _load_dataset(path)

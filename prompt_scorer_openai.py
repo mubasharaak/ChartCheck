@@ -7,7 +7,7 @@ from nltk.tokenize import sent_tokenize
 from sklearn.metrics import f1_score
 
 _SEED = 10
-_MODEL = "gpt-4-vision-preview"
+_MODEL = "gpt-3.5-turbo-1106"
 _MAX_TOKENS = 1500
 
 LABEL_DICT = {
@@ -193,10 +193,10 @@ def evaluate_openai_output(output):
         response = entry["response"]
         if "true" in response.lower():
             class_label_preds.append(LABEL_DICT["true"])
-            class_label_gold.append(LABEL_DICT[entry["label"]])
+            class_label_gold.append(LABEL_DICT[entry["label"].lower()])
         elif "false" in response.lower():
             class_label_preds.append(LABEL_DICT["false"])
-            class_label_gold.append(LABEL_DICT[entry["label"]])
+            class_label_gold.append(LABEL_DICT[entry["label"].lower()])
         else:
             continue
 

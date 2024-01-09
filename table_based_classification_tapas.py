@@ -17,10 +17,10 @@ DATASET_PATH_TEST = "dataset/claim_explanation_verification_pre_tasksets_test_V2
 DATASET_PATH_TEST_TWO = "dataset/claim_explanation_verification_pre_tasksets_test_two_V2.json"
 
 LABEL_DICT = {
-    "Yes": 0,
-    "No": 1,
-    "TRUE": 0,
-    "FALSE": 1,
+    "yes": 0,
+    "no": 1,
+    "true": 0,
+    "false": 1,
 }
 METRIC = evaluate.load("glue", "mrpc")
 _ONLY_TEST = True
@@ -52,7 +52,7 @@ def _read_chart_dataset(dataset):
         # claims.append(claim + "[SEP]" + caption)
         claims.append(claim)
         tables.append(table)
-        labels.append(LABEL_DICT[label])
+        labels.append(LABEL_DICT[label.lower()])
 
     return claims, tables, labels
 
@@ -228,12 +228,12 @@ if __name__ == "__main__":
             predictions = np.argmax(logits, axis=-1)
             f.write(f"input: {tokenizer.decode(test_dataset[i]['input_ids'])}\n")
             f.write(f"label: {LABEL_DICT[results_dict.label_ids[i]]}\n")
-            f.write(f"prediction: {LABEL_DICT[predictions[i]]}\n\n")
+            f.write(f"prediction: {LABEL_DICT[predictions[i].lower()]}\n\n")
 
     with open(os.path.join(output_dir, "test_two_output.txt"), "w") as f:
         f.write(f"metrics: {results_dict_two.metrics}\n\n")
         for i, logits in enumerate(results_dict_two.predictions.tolist()):
             predictions = np.argmax(logits, axis=-1)
             f.write(f"input: {tokenizer.decode(test_dataset[i]['input_ids'])}\n")
-            f.write(f"label: {LABEL_DICT[results_dict_two.label_ids[i]]}\n")
-            f.write(f"prediction: {LABEL_DICT[predictions[i]]}\n\n")
+            f.write(f"label: {LABEL_DICT[results_dict_two.label_ids[i].lower()]}\n")
+            f.write(f"prediction: {LABEL_DICT[predictions[i].lower()]}\n\n")

@@ -101,6 +101,7 @@ def compute_metrics(eval_preds):
     preds, labels = eval_preds
     if isinstance(preds, tuple):
         preds = preds[0]
+    preds = np.where(preds != -100, preds, tokenizer.pad_token_id)
     decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
 
     # Replace -100 in the labels as we can't decode them.
@@ -133,32 +134,32 @@ def compute_metrics(eval_preds):
     result = {k: round(v * 100, 4) for k, v in result.items()}
     prediction_lens = [np.count_nonzero(pred != tokenizer.pad_token_id) for pred in preds]
     result["gen_len"] = np.mean(prediction_lens)
-
-    # bleu
-    metric = evaluate.load("bleu")
-    result_bleu = metric.compute(predictions=decoded_preds, references=decoded_labels)
-    result.update(result_bleu)
-
-    # bertscore
-    metric = evaluate.load("bertscore")
-    result_bertscore = metric.compute(predictions=decoded_preds, references=decoded_labels, lang="en")
-    result_bertscore = {k: sum(v) / len(v) for k, v in result_bertscore.items() if k in ['precision', 'recall', 'f1']}
-    result_bertscore["bertscore_precision"] = result_bertscore.pop("precision")
-    result_bertscore["bertscore_recall"] = result_bertscore.pop("recall")
-    result_bertscore["bertscore_f1"] = result_bertscore.pop("f1")
-    result.update(result_bertscore)
-
-    # meteor
-    metric = evaluate.load("meteor")
-    result_meteor = metric.compute(predictions=decoded_preds, references=decoded_labels)
-    result.update(result_meteor)
-
-    # bleurt
-    metric = evaluate.load('bleurt')
-    result_bleurt = metric.compute(predictions=decoded_preds, references=decoded_labels)
-    result_bleurt = {k: sum(v) / len(v) for k, v in result_bleurt.items()}
-    result_bleurt["bleurt"] = result_bleurt.pop("scores")
-    result.update(result_bleurt)
+    #
+    # # bleu
+    # metric = evaluate.load("bleu")
+    # result_bleu = metric.compute(predictions=decoded_preds, references=decoded_labels)
+    # result.update(result_bleu)
+    #
+    # # bertscore
+    # metric = evaluate.load("bertscore")
+    # result_bertscore = metric.compute(predictions=decoded_preds, references=decoded_labels, lang="en")
+    # result_bertscore = {k: sum(v) / len(v) for k, v in result_bertscore.items() if k in ['precision', 'recall', 'f1']}
+    # result_bertscore["bertscore_precision"] = result_bertscore.pop("precision")
+    # result_bertscore["bertscore_recall"] = result_bertscore.pop("recall")
+    # result_bertscore["bertscore_f1"] = result_bertscore.pop("f1")
+    # result.update(result_bertscore)
+    #
+    # # meteor
+    # metric = evaluate.load("meteor")
+    # result_meteor = metric.compute(predictions=decoded_preds, references=decoded_labels)
+    # result.update(result_meteor)
+    #
+    # # bleurt
+    # metric = evaluate.load('bleurt')
+    # result_bleurt = metric.compute(predictions=decoded_preds, references=decoded_labels)
+    # result_bleurt = {k: sum(v) / len(v) for k, v in result_bleurt.items()}
+    # result_bleurt["bleurt"] = result_bleurt.pop("scores")
+    # result.update(result_bleurt)
 
     if not ONLY_EXPLANATION:
         # classification results
@@ -222,7 +223,8 @@ def preprocess_function_classification_explanation(examples, training_setting="f
     model_inputs = tokenizer(inputs, max_length=MAX_INPUT_LEN, padding="max_length", truncation=True)
 
     # Input instructioon: "{label}. {explanation}"
-    labels = tokenizer(text_target=[f"{LABEL_DICT_REVERSE[doc['label']]}. " + doc["explanation"] for doc in examples],
+    print("First example: {}".format(examples[0]))
+    labels = tokenizer(text_target=["{}. {}".format(LABEL_DICT_REVERSE[doc['label']], doc["explanation"]) for doc in examples],
                        max_length=MAX_TARGET_LEN, padding="max_length", truncation=True)
     labels["input_ids"] = [
         [(l if l != tokenizer.pad_token_id else -100) for l in label] for label in labels["input_ids"]
@@ -428,6 +430,7 @@ if __name__ == "__main__":
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
         push_to_hub=False,
+        generation_max_length=100
     )
 
     if FINETUNING:
@@ -450,13 +453,12 @@ if __name__ == "__main__":
     with open(path_testset_two_metrics, "w") as f:
         f.write(f"result_dict.metrics: {results_dict_two.metrics}\n\n")
 
-    for results, path in zip([results_dict, results_dict_two], [path_testset_one_predictions, path_testset_two_predictions]):
-        with open(os.path.join(output_path, path_testset_one_predictions), "w") as f:
+    for results, path, dataset in zip([results_dict, results_dict_two],
+                                      [path_testset_one_predictions, path_testset_two_predictions],
+                                      [test_dataset, test_two_dataset]):
+        with open(os.path.join(output_path, path), "w") as f:
             for i, logits in enumerate(results.predictions.tolist()):
-                predictions = np.argmax(logits, axis=-1)
-                if predictions != results.label_ids.tolist()[i]:
-                    f.write(f"input: {tokenizer.decode(test_dataset[i]['input_ids'])}\n")
-                    f.write(f"label: {results.label_ids.tolist()[i]}\n")
-                    f.write(f"prediction: {predictions}\n\n")
+                f.write("input: {}\n".format(tokenizer.decode(test_dataset[i]['input_ids']).split('Answer')[0]))
+                f.write("prediction: {}\n\n".format(tokenizer.decode(logits)))
 
     # todo save results as CSV files: [claim, gold_explanation, label, predicted_label, predicted_explanation]

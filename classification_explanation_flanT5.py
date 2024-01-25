@@ -466,8 +466,6 @@ if __name__ == "__main__":
         preds = []
         with open(os.path.join(output_path, path), "w") as f:
             for i, decoded_pred in enumerate(results.metrics['test_preds']):
-                # preds = np.where(preds != -100, preds, tokenizer.pad_token_id)
-                # decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
                 input_text = tokenizer.decode(dataset[i]['input_ids']).split('Answer')[0]
                 f.write("input: {}\n".format(input_text))
                 f.write("prediction: {}\n\n".format(decoded_pred))

@@ -29,12 +29,13 @@ ONLY_CLASSIFICATION = False
 CLASSIFICATIONS_BY = ""
 
 if FINETUNING and not ONLY_TEST:
-    HG_MODEL_HUB_NAME = "google/flan-t5-base"
+    TOKENIZER_PATH = HG_MODEL_HUB_NAME = "google/flan-t5-base"
 elif FINETUNING and ONLY_TEST:
     HG_MODEL_HUB_NAME = "/scratch/users/k20116188/chart-fact-checking/chart_classification_explanation_FlanT5_finetune/checkpoint-2200"
+    TOKENIZER_PATH = "google/flan-t5-base"
 else:
     # zero or few shot setting
-    HG_MODEL_HUB_NAME = "google/flan-t5-xl"
+    TOKENIZER_PATH = HG_MODEL_HUB_NAME = "google/flan-t5-xl"
 
 LABEL_DICT = {
     "Yes": 0,
@@ -298,7 +299,7 @@ def _load_dataset(path: str):
 
 if __name__ == "__main__":
     # Load model
-    tokenizer = AutoTokenizer.from_pretrained(HG_MODEL_HUB_NAME)
+    tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
     model = AutoModelForSeq2SeqLM.from_pretrained(HG_MODEL_HUB_NAME)
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     model.to(device)

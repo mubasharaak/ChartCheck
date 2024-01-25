@@ -4,6 +4,7 @@ import re
 
 import evaluate
 import numpy as np
+import pandas as pd
 import torch
 from nltk.tokenize import sent_tokenize
 # nltk.download("punkt")
@@ -167,6 +168,9 @@ def compute_metrics(eval_preds):
         f1_macro = f1_score(y_true=class_label_gold, y_pred=class_label_preds, average='macro')
         result["f1_micro"] = f1_micro
         result["f1_macro"] = f1_macro
+
+    # add predictions
+    result['preds'] = decoded_preds
 
     return result
 
@@ -410,6 +414,8 @@ if __name__ == "__main__":
     path_testset_two_metrics = os.path.join(output_path, "metrics_testset_two.txt")
     path_testset_one_predictions = os.path.join(output_path, "predictions_testset_one.txt")
     path_testset_two_predictions = os.path.join(output_path, "predictions_testset_two.txt")
+    path_testset_one_df = os.path.join(output_path, "predictions_testset_one.csv")
+    path_testset_two_df = os.path.join(output_path, "predictions_testset_two.csv")
 
     training_args = Seq2SeqTrainingArguments(
         output_dir=output_path,  # output directory
@@ -453,12 +459,21 @@ if __name__ == "__main__":
     with open(path_testset_two_metrics, "w") as f:
         f.write(f"result_dict.metrics: {results_dict_two.metrics}\n\n")
 
-    for results, path, dataset in zip([results_dict, results_dict_two],
+    for results, path, dataset, path_df in zip([results_dict, results_dict_two],
                                       [path_testset_one_predictions, path_testset_two_predictions],
-                                      [test_dataset, test_two_dataset]):
+                                      [test_dataset, test_two_dataset], [path_testset_one_df, path_testset_two_df]):
+        claims = []
+        preds = []
         with open(os.path.join(output_path, path), "w") as f:
-            for i, logits in enumerate(results.predictions.tolist()):
-                f.write("input: {}\n".format(tokenizer.decode(test_dataset[i]['input_ids']).split('Answer')[0]))
-                f.write("prediction: {}\n\n".format(tokenizer.decode(logits)))
+            for i, decoded_pred in enumerate(results.metrics['test_preds']):
+                # preds = np.where(preds != -100, preds, tokenizer.pad_token_id)
+                # decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
+                input_text = tokenizer.decode(dataset[i]['input_ids']).split('Answer')[0]
+                f.write("input: {}\n".format(input_text))
+                f.write("prediction: {}\n\n".format(decoded_pred))
 
-    # todo save results as CSV files: [claim, gold_explanation, label, predicted_label, predicted_explanation]
+                claims.append(input_text)
+                preds.append(decoded_pred.split("\n")[1])
+
+        results_df = pd.DataFrame({'claims': claims, 'predicted_explanation': results.metrics['test_preds']})
+        results_df.to_csv(path_df)

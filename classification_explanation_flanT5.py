@@ -20,16 +20,20 @@ DATASET_PATH_VAL = "dataset/claim_explanation_verification_pre_tasksets_validati
 DATASET_PATH_TEST = "dataset/claim_explanation_verification_pre_tasksets_test_V2.json"
 DATASET_PATH_TEST_TWO = "dataset/claim_explanation_verification_pre_tasksets_test_two_V2.json"
 
-FINETUNING = False
-FEWSHOT = True
+FINETUNING = True
+ONLY_TEST = True
+FEWSHOT = False
 ZEROSHOT = False
 ONLY_EXPLANATION = False
 ONLY_CLASSIFICATION = False
 CLASSIFICATIONS_BY = ""
 
-if FINETUNING:
+if FINETUNING and not ONLY_TEST:
     HG_MODEL_HUB_NAME = "google/flan-t5-base"
+elif FINETUNING and ONLY_TEST:
+    HG_MODEL_HUB_NAME = "/scratch/users/k20116188/chart-fact-checking/chart_classification_explanation_FlanT5_finetune/checkpoint-2200"
 else:
+    # zero or few shot setting
     HG_MODEL_HUB_NAME = "google/flan-t5-xl"
 
 LABEL_DICT = {
@@ -298,7 +302,8 @@ if __name__ == "__main__":
     model = AutoModelForSeq2SeqLM.from_pretrained(HG_MODEL_HUB_NAME)
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     model.to(device)
-    model.train()
+    if FINETUNING and not ONLY_TEST:
+        model.train()
 
     # load files (train, validation, first and second test set)
     train_data = _load_dataset(DATASET_PATH_TRAIN)
@@ -398,8 +403,10 @@ if __name__ == "__main__":
 
     if not os.path.exists(output_path):
         os.makedirs(output_path)
-    path_test_output = os.path.join(output_path, "test_output.txt")
-    path_test_two_output = os.path.join(output_path, "test_two_output.txt")
+    path_testset_one_metrics = os.path.join(output_path, "metrics_testset_one.txt")
+    path_testset_two_metrics = os.path.join(output_path, "metrics_testset_two.txt")
+    path_testset_one_predictions = os.path.join(output_path, "predictions_testset_one.txt")
+    path_testset_two_predictions = os.path.join(output_path, "predictions_testset_two.txt")
 
     training_args = Seq2SeqTrainingArguments(
         output_dir=output_path,  # output directory
@@ -424,10 +431,11 @@ if __name__ == "__main__":
 
     if FINETUNING:
         results_dict = train(model, training_args, train_dataset=train_dataset,
-                             dev_dataset=val_dataset, test_dataset=test_dataset, save_path=output_path, only_test=False)
+                             dev_dataset=val_dataset, test_dataset=test_dataset, save_path=output_path,
+                             only_test=ONLY_TEST)
         results_dict_two = train(model, training_args, train_dataset=train_dataset,
                                  dev_dataset=val_dataset, test_dataset=test_two_dataset, save_path=output_path,
-                                 only_test=True)
+                                 only_test=ONLY_TEST)
     else:
         results_dict = train(model, training_args, train_dataset=train_dataset,
                              dev_dataset=val_dataset, test_dataset=test_dataset, save_path=output_path, only_test=True)
@@ -435,8 +443,19 @@ if __name__ == "__main__":
                                  dev_dataset=val_dataset, test_dataset=test_two_dataset, save_path=output_path,
                                  only_test=True)
 
-    with open(path_test_output, "w") as f:
+    with open(path_testset_one_metrics, "w") as f:
         f.write(f"result_dict.metrics: {results_dict.metrics}\n\n")
 
-    with open(path_test_two_output, "w") as f:
+    with open(path_testset_two_metrics, "w") as f:
         f.write(f"result_dict.metrics: {results_dict_two.metrics}\n\n")
+
+    for results, path in zip([results_dict, results_dict_two], [path_testset_one_predictions, path_testset_two_predictions]):
+        with open(os.path.join(output_path, path_testset_one_predictions), "w") as f:
+            for i, logits in enumerate(results.predictions.tolist()):
+                predictions = np.argmax(logits, axis=-1)
+                if predictions != results.label_ids.tolist()[i]:
+                    f.write(f"input: {tokenizer.decode(test_dataset[i]['input_ids'])}\n")
+                    f.write(f"label: {results.label_ids.tolist()[i]}\n")
+                    f.write(f"prediction: {predictions}\n\n")
+
+    # todo save results as CSV files: [claim, gold_explanation, label, predicted_label, predicted_explanation]

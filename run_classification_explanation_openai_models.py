@@ -4,7 +4,7 @@ import os
 
 import openai
 
-import prompt_scorer_openai
+import openai_classification_explanation
 import random
 
 parser = argparse.ArgumentParser(
@@ -93,10 +93,10 @@ def main():
             input_data = _load_dataset(path)
             # select subset
             input_data = random.sample(input_data, _RAND_SUBSET)
-            predictions = prompt_scorer_openai.prompt_openai_model(input_data, _CLIENT)
+            predictions = openai_classification_explanation.prompt_openai_model(input_data, _CLIENT)
             _save_jsonl_file(predictions, _OUTPUT_PATH_PREDICTIONS)
 
-        scores = prompt_scorer_openai.evaluate_openai_output(predictions)
+        scores = openai_classification_explanation.evaluate_openai_output(predictions)
         print("Output for test set {}: {}".format(index_mapping[i], scores))
         with open(_OUTPUT_PATH_METRICS, "w", encoding="utf-8") as f:
             json.dump(scores, f, indent=4)

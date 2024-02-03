@@ -8,6 +8,7 @@ from sklearn.metrics import f1_score, accuracy_score, recall_score
 
 _SEED = 10
 _MODEL = "gpt-4-vision-preview"
+# _MODEL = "gpt-3.5-turbo-1106"
 _MAX_TOKENS = 1500
 
 LABEL_DICT = {

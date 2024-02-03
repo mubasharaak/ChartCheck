@@ -22,7 +22,7 @@ parser.add_argument(
 )
 parser.add_argument(
     '--output_path',
-    default="chart_table_classification_GPT4v_classify_n_explain",
+    default="chart_table_classification_{}_classify_n_explain_zeroshot_{}",
     help='Path to output file for scores.'
 )
 parser.add_argument(
@@ -35,18 +35,26 @@ parser.add_argument(
     '--zero_shot',
     default=False,
     action="store_true",
-    help='Given predictions_output_path load predictions for evaluation.'
+    help='Zero or few shot prompting.'
 )
+parser.add_argument(
+    '--model',
+    default="GPT4V",
+    help='Model'
+)
+
 args = parser.parse_args()
 _TEST_SET_PATH = args.test_set_path
 _TEST_SET_TWO_PATH = args.test_set_path
 _ONLY_EVALUATE = args.only_evaluate_no_prediction
 _ZERO_SHOT_EVAL = args.zero_shot
+_MODEL = args.model
 
-_OUTPUT_PATH = os.path.join("results", args.output_path)
+_OUTPUT_PATH = os.path.join("results", args.output_path.format(_MODEL, _ZERO_SHOT_EVAL))
 if not os.path.exists(_OUTPUT_PATH):
     os.makedirs(_OUTPUT_PATH)
 
+print("Results will be saved in {}".format(_OUTPUT_PATH))
 _DEPLOT_TABLES_PATH = "/scratch/users/k20116188/chart-fact-checking/deplot-tables"
 _KEY = open('openai_key.txt', 'r').read()
 _CLIENT = openai.OpenAI(

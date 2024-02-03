@@ -22,7 +22,7 @@ parser.add_argument(
 )
 parser.add_argument(
     '--output_path',
-    default="chart_table_classification_GPT4v_classify_n_explain",
+    default="chart_table_classification_GPT3.5_classify_n_explain",
     help='Path to output file for scores.'
 )
 parser.add_argument(
@@ -46,7 +46,7 @@ _CLIENT = openai.OpenAI(
     api_key=_KEY,
     timeout=10,
 )
-_MODEL = "GPT4V"
+_MODEL = "GPT3.5"
 _RAND_SUBSET = 100
 random.seed(10)
 

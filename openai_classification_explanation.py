@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import openai
 from nltk.tokenize import sent_tokenize
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, accuracy_score, recall_score
 
 _SEED = 10
 _MODEL = "gpt-3.5-turbo-1106"
@@ -201,4 +201,7 @@ def evaluate_openai_output(output):
             continue
 
     return {"f1_micro": f1_score(y_true=class_label_gold, y_pred=class_label_preds, average='micro'),
-            "f1_macro": f1_score(y_true=class_label_gold, y_pred=class_label_preds, average='macro')}
+            "f1_macro": f1_score(y_true=class_label_gold, y_pred=class_label_preds, average='macro'),
+            "accuracy": accuracy_score(y_true=class_label_gold, y_pred=class_label_preds),
+            "recall": recall_score(y_true=class_label_gold, y_pred=class_label_preds),
+            }

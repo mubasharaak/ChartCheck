@@ -473,5 +473,5 @@ if __name__ == "__main__":
                 claims.append(input_text)
                 preds.append(decoded_pred.split("\n")[1])
 
-        results_df = pd.DataFrame({'claims': claims, 'predicted_explanation': results.metrics['test_preds']})
+        results_df = pd.DataFrame({'claims': claims, 'predicted_explanation': preds})
         results_df.to_csv(path_df)

@@ -7,7 +7,7 @@ from nltk.tokenize import sent_tokenize
 from sklearn.metrics import f1_score, accuracy_score, recall_score
 
 _SEED = 10
-_MODEL = "gpt-3.5-turbo-1106"
+_MODEL = "gpt-4-vision-preview"
 _MAX_TOKENS = 1500
 
 LABEL_DICT = {
@@ -41,6 +41,7 @@ class OpenAIResponse:
 _PROMPT = """
 You will get a claim, a table and its caption. 
 Decide if the claim is 'true' or 'false' based on the provided table and caption, explain your decision.
+The response should have the following format: ['true' or 'false']. [explanation].
 Use no further background knowledge but your commonsense to understand the table. 
 
 -----
@@ -62,10 +63,24 @@ Caption: {}
 Table: {}
 Answer:"""
 
+_PROMPT_ZERO = """
+You will get a claim, a table and its caption. 
+Decide if the claim is 'true' or 'false' based on the provided table and caption, explain your decision.
+The response should have the following format: ['true' or 'false']. [explanation].
+Use no further background knowledge but your commonsense to understand the table. 
+
+-----
+Complete the following:
+Claim: {}
+Caption: {}
+Table: {}
+Answer:"""
+
 _PROMPT_VISION = """
 You will get a claim, a chart image and its caption. 
 Decide if the claim is 'true' or 'false' based on the provided chart and caption, explain your decision.
-Use no further background knowledge but your commonsense to understand the chart. 
+The response should have the following format: ['true' or 'false']. [explanation].
+Use no further background knowledge but your commonsense to understand the chart.
 
 -----
 Examples: 
@@ -83,52 +98,71 @@ Claim: {}
 Caption: {}
 Answer:"""
 
+_PROMPT_VISION_ZERO = """
+You will get a claim, a chart image and its caption. 
+Decide if the claim is 'true' or 'false' based on the provided chart and caption, explain your decision.
+The response should have the following format: ['true' or 'false']. [explanation].
+Use no further background knowledge but your commonsense to understand the chart.
+
+-----
+Complete the following:
+Claim: {}
+Caption: {}
+Answer:"""
+
 
 def _query_openai(dataset_entry, prompt: str, client, seed=_SEED, model=_MODEL, max_tokens=_MAX_TOKENS):
-    if "3.5" in model:
-        return client.chat.completions.create(
-            messages=[
+    try:
+        if "3.5" in model:
+            return client.chat.completions.create(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    }
+                ],
+                model=model,
+                max_tokens=max_tokens,
+                # response_format={"type": response_format},
+                seed=seed,
+            )
+        else:
+            # GPT4V
+            prompt_messages = [
                 {
                     "role": "user",
-                    "content": prompt,
-                }
-            ],
-            model=model,
-            max_tokens=max_tokens,
-            # response_format={"type": response_format},
-            seed=seed,
-        )
-    else:
-        # GPT4V
-        prompt_messages = [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": prompt
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": dataset_entry["chart_img"]
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": prompt
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": dataset_entry["chart_img"]
+                            }
                         }
-                    }
-                ]
+                    ]
+                }
+            ]
+            params = {
+                "model": model,
+                "messages": prompt_messages,
+                # "response_format": {"type": "json_object"},  # Added response format
+                # "headers": {"Openai-Version": "2020-11-07"},
+                "max_tokens": max_tokens,
             }
-        ]
-        params = {
-            "model": model,
-            "messages": prompt_messages,
-            # "response_format": {"type": "json_object"},  # Added response format
-            # "headers": {"Openai-Version": "2020-11-07"},
-            "max_tokens": max_tokens,
-        }
-        return client.chat.completions.create(**params)
+            return client.chat.completions.create(**params)
+    except Exception as e:
+        print("Following error occurred: {}".format(e))
+        return None
 
 
 def _get_response_text(response: openai.types.chat.chat_completion.ChatCompletion):
-    return response.choices[0].message.content
+    if response:
+        return response.choices[0].message.content
+    else:
+        return ""
 
 
 def _process_output(dataset_sample,
@@ -145,22 +179,29 @@ def _read_table(chart_filename: str):
     return table
 
 
-def _prepare_prompt(dataset_sample):
+def _prepare_prompt(dataset_sample, zero_shot):
     """Formats prompt using dataset sample as input."""
     if "3.5" in _MODEL:
-        return _PROMPT.format(dataset_sample["claim"], _read_table(dataset_sample["chart_img"]),
-                              dataset_sample["caption"])
+        if zero_shot:
+            return _PROMPT_ZERO.format(dataset_sample["claim"], dataset_sample["caption"],
+                                       _read_table(dataset_sample["chart_img"]))
+        else:
+            return _PROMPT.format(dataset_sample["claim"], dataset_sample["caption"],
+                                  _read_table(dataset_sample["chart_img"]))
     else:
-        return _PROMPT_VISION.format(dataset_sample["claim"], dataset_sample["caption"])
+        if zero_shot:
+            return _PROMPT_VISION_ZERO.format(dataset_sample["claim"], dataset_sample["caption"])
+        else:
+            return _PROMPT_VISION.format(dataset_sample["claim"], dataset_sample["caption"])
 
 
-def prompt_openai_model(dataset: list, client):
+def prompt_openai_model(dataset: list, client, zero_shot):
     """Prompts OpenAI models."""
     responses = []
     for sample in dataset:
         # try:
         print("next sample.")
-        prompt = _prepare_prompt(sample)
+        prompt = _prepare_prompt(sample, zero_shot)
         while True:
             try:
                 responses.append(_process_output(sample, _query_openai(sample, prompt, client)))
@@ -190,15 +231,16 @@ def evaluate_openai_output(output):
     class_label_preds = []
     class_label_gold = []
     for i, entry in enumerate(output):
-        response = entry["response"]
-        if "true" in response.lower():
-            class_label_preds.append(LABEL_DICT["true"])
-            class_label_gold.append(LABEL_DICT[entry["label"].lower()])
-        elif "false" in response.lower():
-            class_label_preds.append(LABEL_DICT["false"])
-            class_label_gold.append(LABEL_DICT[entry["label"].lower()])
-        else:
-            continue
+        if entry:
+            response = entry["response"]
+            if "true" in response.lower() and "not true" not in response.lower():
+                class_label_preds.append(LABEL_DICT["true"])
+                class_label_gold.append(LABEL_DICT[entry["label"].lower()])
+            elif "false" in response.lower() and "not false" not in response.lower():
+                class_label_preds.append(LABEL_DICT["false"])
+                class_label_gold.append(LABEL_DICT[entry["label"].lower()])
+            else:
+                continue
 
     return {"f1_micro": f1_score(y_true=class_label_gold, y_pred=class_label_preds, average='micro'),
             "f1_macro": f1_score(y_true=class_label_gold, y_pred=class_label_preds, average='macro'),

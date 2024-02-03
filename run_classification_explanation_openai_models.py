@@ -22,7 +22,7 @@ parser.add_argument(
 )
 parser.add_argument(
     '--output_path',
-    default="chart_table_classification_GPT3.5_classify_n_explain",
+    default="chart_table_classification_GPT4v_classify_n_explain",
     help='Path to output file for scores.'
 )
 parser.add_argument(
@@ -31,10 +31,17 @@ parser.add_argument(
     action="store_true",
     help='Given predictions_output_path load predictions for evaluation.'
 )
+parser.add_argument(
+    '--zero_shot',
+    default=False,
+    action="store_true",
+    help='Given predictions_output_path load predictions for evaluation.'
+)
 args = parser.parse_args()
 _TEST_SET_PATH = args.test_set_path
 _TEST_SET_TWO_PATH = args.test_set_path
 _ONLY_EVALUATE = args.only_evaluate_no_prediction
+_ZERO_SHOT_EVAL = args.zero_shot
 
 _OUTPUT_PATH = os.path.join("results", args.output_path)
 if not os.path.exists(_OUTPUT_PATH):
@@ -46,7 +53,6 @@ _CLIENT = openai.OpenAI(
     api_key=_KEY,
     timeout=10,
 )
-_MODEL = "GPT3.5"
 _RAND_SUBSET = 100
 random.seed(10)
 
@@ -93,7 +99,7 @@ def main():
             input_data = _load_dataset(path)
             # select subset
             input_data = random.sample(input_data, _RAND_SUBSET)
-            predictions = openai_classification_explanation.prompt_openai_model(input_data, _CLIENT)
+            predictions = openai_classification_explanation.prompt_openai_model(input_data, _CLIENT, _ZERO_SHOT_EVAL)
             _save_jsonl_file(predictions, _OUTPUT_PATH_PREDICTIONS)
 
         scores = openai_classification_explanation.evaluate_openai_output(predictions)

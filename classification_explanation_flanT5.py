@@ -21,10 +21,10 @@ DATASET_PATH_VAL = "dataset/claim_explanation_verification_pre_tasksets_validati
 DATASET_PATH_TEST = "dataset/claim_explanation_verification_pre_tasksets_test_V2.json"
 DATASET_PATH_TEST_TWO = "dataset/claim_explanation_verification_pre_tasksets_test_two_V2.json"
 
-FINETUNING = True
+FINETUNING = False
 ONLY_TEST = True
 FEWSHOT = False
-ZEROSHOT = False
+ZEROSHOT = True
 ONLY_EXPLANATION = False
 ONLY_CLASSIFICATION = False
 CLASSIFICATIONS_BY = ""
@@ -126,8 +126,9 @@ def compute_metrics(eval_preds):
             else:
                 continue
 
-    # class_label_preds = [label_dict[entry.lower().split("the claim is ")[1].split(".")[0]] for entry in decoded_preds]
-    # class_label_gold = [label_dict[entry.lower().split("the claim is ")[1].split(".")[0]] for entry in decoded_labels]
+    # TODO check why this was commented out - any error?
+    # class_label_preds = [LABEL_DICT[entry.lower().split("the claim is ")[1].split(".")[0]] for entry in decoded_preds]
+    # class_label_gold = [LABEL_DICT[entry.lower().split("the claim is ")[1].split(".")[0]] for entry in decoded_labels]
 
     # rouge
     metric = evaluate.load("rouge")
@@ -135,32 +136,32 @@ def compute_metrics(eval_preds):
     result = {k: round(v * 100, 4) for k, v in result.items()}
     prediction_lens = [np.count_nonzero(pred != tokenizer.pad_token_id) for pred in preds]
     result["gen_len"] = np.mean(prediction_lens)
-    #
-    # # bleu
-    # metric = evaluate.load("bleu")
-    # result_bleu = metric.compute(predictions=decoded_preds, references=decoded_labels)
-    # result.update(result_bleu)
-    #
-    # # bertscore
-    # metric = evaluate.load("bertscore")
-    # result_bertscore = metric.compute(predictions=decoded_preds, references=decoded_labels, lang="en")
-    # result_bertscore = {k: sum(v) / len(v) for k, v in result_bertscore.items() if k in ['precision', 'recall', 'f1']}
-    # result_bertscore["bertscore_precision"] = result_bertscore.pop("precision")
-    # result_bertscore["bertscore_recall"] = result_bertscore.pop("recall")
-    # result_bertscore["bertscore_f1"] = result_bertscore.pop("f1")
-    # result.update(result_bertscore)
-    #
-    # # meteor
-    # metric = evaluate.load("meteor")
-    # result_meteor = metric.compute(predictions=decoded_preds, references=decoded_labels)
-    # result.update(result_meteor)
-    #
-    # # bleurt
-    # metric = evaluate.load('bleurt')
-    # result_bleurt = metric.compute(predictions=decoded_preds, references=decoded_labels)
-    # result_bleurt = {k: sum(v) / len(v) for k, v in result_bleurt.items()}
-    # result_bleurt["bleurt"] = result_bleurt.pop("scores")
-    # result.update(result_bleurt)
+
+    # bleu
+    metric = evaluate.load("bleu")
+    result_bleu = metric.compute(predictions=decoded_preds, references=decoded_labels)
+    result.update(result_bleu)
+
+    # bertscore
+    metric = evaluate.load("bertscore")
+    result_bertscore = metric.compute(predictions=decoded_preds, references=decoded_labels, lang="en")
+    result_bertscore = {k: sum(v) / len(v) for k, v in result_bertscore.items() if k in ['precision', 'recall', 'f1']}
+    result_bertscore["bertscore_precision"] = result_bertscore.pop("precision")
+    result_bertscore["bertscore_recall"] = result_bertscore.pop("recall")
+    result_bertscore["bertscore_f1"] = result_bertscore.pop("f1")
+    result.update(result_bertscore)
+
+    # meteor
+    metric = evaluate.load("meteor")
+    result_meteor = metric.compute(predictions=decoded_preds, references=decoded_labels)
+    result.update(result_meteor)
+
+    # bleurt
+    metric = evaluate.load('bleurt')
+    result_bleurt = metric.compute(predictions=decoded_preds, references=decoded_labels)
+    result_bleurt = {k: sum(v) / len(v) for k, v in result_bleurt.items()}
+    result_bleurt["bleurt"] = result_bleurt.pop("scores")
+    result.update(result_bleurt)
 
     if not ONLY_EXPLANATION:
         # classification results

@@ -6,6 +6,8 @@ import openai
 from nltk.tokenize import sent_tokenize
 from sklearn.metrics import f1_score, accuracy_score, recall_score
 
+import utils
+
 _SEED = 10
 _MODEL = "gpt-4-vision-preview"
 # _MODEL = "gpt-3.5-turbo-1106"
@@ -229,6 +231,8 @@ def _postprocess_text(preds, labels):
 
 
 def evaluate_openai_output(output):
+    predictions = []
+    references = []
     class_label_preds = []
     class_label_gold = []
     for i, entry in enumerate(output):
@@ -242,9 +246,14 @@ def evaluate_openai_output(output):
                 class_label_gold.append(LABEL_DICT[entry["label"].lower()])
             else:
                 continue
+            references.append(entry["explanation"])
+            predictions.append(". ".join(response.split(". ")[1:]))
 
-    return {"f1_micro": f1_score(y_true=class_label_gold, y_pred=class_label_preds, average='micro'),
-            "f1_macro": f1_score(y_true=class_label_gold, y_pred=class_label_preds, average='macro'),
-            "accuracy": accuracy_score(y_true=class_label_gold, y_pred=class_label_preds),
-            "recall": recall_score(y_true=class_label_gold, y_pred=class_label_preds),
-            }
+    # explanation evaluation
+    result = utils.evaluate_explanations(predictions=predictions, references=references)
+    result.update({"f1_micro": f1_score(y_true=class_label_gold, y_pred=class_label_preds, average='micro'),
+                   "f1_macro": f1_score(y_true=class_label_gold, y_pred=class_label_preds, average='macro'),
+                   "accuracy": accuracy_score(y_true=class_label_gold, y_pred=class_label_preds),
+                   "recall": recall_score(y_true=class_label_gold, y_pred=class_label_preds),
+                   })
+    return result

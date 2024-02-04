@@ -39,7 +39,7 @@ parser.add_argument(
 )
 parser.add_argument(
     '--model',
-    default="GPT4V",
+    default="GPT3.5",
     help='Model'
 )
 
@@ -101,7 +101,7 @@ def main():
 
         if _ONLY_EVALUATE:
             # Given predictions_output_path load predictions for evaluation
-            predictions = _load_jsonl_file(os.path.join(_OUTPUT_PATH, ""))
+            predictions = _load_jsonl_file(os.path.join(_OUTPUT_PATH, "predictions_testset_{}.jsonl".format(index_mapping[i])))
         else:
             # predict using OpenAI API and evaluate
             input_data = _load_dataset(path)

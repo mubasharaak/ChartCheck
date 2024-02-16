@@ -1,7 +1,8 @@
-# ChartCheck: An Evidence-Based Fact-Checking Dataset over Real-World Chart Images
+# ChartCheck: Explainable Fact-Checking over Real-World Chart Images
 
-ChartCheck, a chart fact-checking dataset with real-world chart images from [Wikimedia Commons](https://commons.wikimedia.org/wiki/Main_Page),
-is available here: [github.com/mubasharaak/chartfc_dataset_wikicommons](https://github.com/mubasharaak/chartfc_dataset_wikicommons).
+ChartCheck is a chart fact-checking dataset with real-world chart images from [Wikimedia Commons](https://commons.wikimedia.org/wiki/Main_Page).
+
+Dataset available here: [github.com/mubasharaak/chartfc_dataset_wikicommons](https://github.com/mubasharaak/chartfc_dataset_wikicommons).
 
 If you use our dataset or code, please cite our paper: [ChartCheck: An Evidence-Based Fact-Checking Dataset over Real-World Chart Images](https://arxiv.org/pdf/2311.07453.pdf).
 

@@ -126,7 +126,6 @@ def compute_metrics(eval_preds):
             else:
                 continue
 
-    # TODO check why this was commented out - any error?
     # class_label_preds = [LABEL_DICT[entry.lower().split("the claim is ")[1].split(".")[0]] for entry in decoded_preds]
     # class_label_gold = [LABEL_DICT[entry.lower().split("the claim is ")[1].split(".")[0]] for entry in decoded_labels]
 
@@ -157,11 +156,11 @@ def compute_metrics(eval_preds):
     result.update(result_meteor)
 
     # bleurt
-    metric = evaluate.load('bleurt')
-    result_bleurt = metric.compute(predictions=decoded_preds, references=decoded_labels)
-    result_bleurt = {k: sum(v) / len(v) for k, v in result_bleurt.items()}
-    result_bleurt["bleurt"] = result_bleurt.pop("scores")
-    result.update(result_bleurt)
+    # metric = evaluate.load('bleurt')
+    # result_bleurt = metric.compute(predictions=decoded_preds, references=decoded_labels)
+    # result_bleurt = {k: sum(v) / len(v) for k, v in result_bleurt.items()}
+    # result_bleurt["bleurt"] = result_bleurt.pop("scores")
+    # result.update(result_bleurt)
 
     if not ONLY_EXPLANATION:
         # classification results
@@ -472,7 +471,10 @@ if __name__ == "__main__":
                 f.write("prediction: {}\n\n".format(decoded_pred))
 
                 claims.append(input_text)
-                preds.append(decoded_pred.split("\n")[1])
+                if len(decoded_pred.split("\n")) > 1:
+                    preds.append(decoded_pred.split("\n")[1])
+                else:
+                    preds.append(decoded_pred)
 
         results_df = pd.DataFrame({'claims': claims, 'predicted_explanation': preds})
         results_df.to_csv(path_df)
